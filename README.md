@@ -3,8 +3,8 @@
   <h1>Codex-codeshark</h1>
   <p><strong>Your Codex agent, on call from anywhere.</strong></p>
   <p>
-    Hand off real repo work, recurring checks, and the loose ends waiting at your desk.<br>
-    CodeShark runs on your Mac, learns how you work, and sends back the result.
+    Hand off repo work, investigations, and recurring checks.<br>
+    CodeShark runs on your Mac, learns how you work, and returns the finished result.
   </p>
   <p>
     <a href="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml"><img src="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
@@ -15,46 +15,67 @@
   </p>
   <p>
     <a href="#quick-start">Quick start</a> ·
-    <a href="#what-it-does">Features</a> ·
+    <a href="#what-it-can-do">Capabilities</a> ·
     <a href="#security-defaults">Security</a> ·
-    <a href="#telegram-command-reference">Commands</a> ·
-    <a href="#upgrading">Upgrading</a>
+    <a href="docs/telegram.md">Chat interface</a> ·
+    <a href="#development">Development</a>
   </p>
 </div>
 
-Codex-codeshark turns the OpenAI Codex CLI already on your Mac into an always-on personal agent you can reach from Telegram. Send a request in natural language and it can continue your working session, inspect or modify approved projects, run commands, accept files, schedule follow-up work, and remember durable preferences for next time.
+Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a persistent personal agent. Give it an outcome, not a sequence of button clicks: it can inspect and modify approved projects, run commands, work from attached files, keep context across tasks, and follow up later on a schedule.
 
-The queue survives restarts. Risky actions stop for approval. You get the finished result instead of a stream of process chatter. Telegram is the private remote control; the actual work stays on your Mac.
-
-## What it does
-
-- **Takes on real project work** — inspects, edits, and runs commands inside a private workspace or server-approved project roots.
-- **Keeps the thread** — continues one Codex conversation across messages and process restarts, then rolls long sessions into durable summaries.
-- **Learns how you work** — captures useful preferences and procedures as searchable memories and reusable skills, with explicit review and deletion controls.
-- **Follows up on schedule** — runs one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions.
-- **Works from the files you send** — saves photos and documents to a private inbox and uses their captions as task instructions.
-- **Waits when the stakes are higher** — holds destructive or externally mutating requests until you explicitly approve them.
-- **Answers a group without exposing your agent** — enabled groups get mention-only, requester-isolated, read-only conversations with no access to your projects, tools, or private context.
-- **Operates like a service** — queues work durably, retries failed Telegram deliveries, rotates bounded data, and ships with install, status, logs, restart, migration, and diagnostic commands.
-
-For example, you can ask it to fix a failing test in an approved repo, investigate an attached error log, remember a project convention, or check a service every morning. It uses your existing Codex login, needs no separate model API key, keeps the Telegram bot token in macOS Keychain, and adds zero runtime dependencies.
+Telegram is the current remote inbox, not the product itself. The reasoning, tools, project access, memory, and automation live in the local agent runtime.
 
 > [!IMPORTANT]
-> Codex-codeshark is intentionally a **single-administrator, Telegram-only, macOS gateway**. Group members are unprivileged guests, not additional administrators. It is not a hosted bot service or a multi-agent framework.
+> Codex-codeshark is deliberately built for one administrator on one Mac. It is not a hosted bot service, a shared shell, or a multi-agent framework.
 
-## Personal by design
+## What it can do
 
-This is a focused personal agent, not a general-purpose bot platform. One channel, one administrator, explicit guest-group access, and one local Codex runtime keep its behavior and security boundary understandable.
-
-| Principle | What it means here |
+| Capability | What you get |
 |---|---|
-| Local first | Codex runs on your Mac; writes stay inside a server-controlled workspace. |
-| One administrator | Exactly one paired Telegram user ID receives sessions, memory, tools, and control commands. |
-| Bounded guests | Only explicit `@bot` mentions in enabled groups enter a separate ephemeral and filesystem-isolated runtime; context is isolated per requester. |
-| Deliberate autonomy | The model proactively learns durable administrator patterns; risky external actions still wait for explicit approval. |
-| Durable, not unbounded | Queues, sessions, memories, skills, feedback, and failed deliveries have retention limits. |
-| Fail closed | Unlisted MCP servers or tools prevent startup instead of silently becoming available. |
-| Portable personal data | Memories, skills, feedback, and schedules can move without exporting secrets. |
+| Project work | Inspect, edit, test, and diagnose code inside a private workspace or explicitly delegated project roots. |
+| Persistent context | Continue the same Codex session across requests and process restarts without re-explaining the project every time. |
+| Durable memory | Recall useful preferences and project conventions, then load only the relevant memories and skills for the current task. |
+| Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
+| File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
+| Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
+| Isolated guest answers | Offer bounded, mention-triggered group conversations without exposing private projects, tools, or administrator context. |
+| Service-grade operation | Persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
+
+The useful unit is a finished task:
+
+```text
+Fix the failing authentication tests in my API project and summarize the diff.
+Read this error log, find the root cause, and tell me the smallest safe fix.
+Every weekday at 09:00, check whether the local service is healthy.
+Remember that this repo uses conventional commits and never squashes migrations.
+```
+
+It uses your existing Codex login, needs no separate model API key, and adds zero runtime dependencies.
+
+## How it works
+
+```text
+Natural-language request or file
+              |
+              v
+     Durable queue + risk gate
+              |
+              v
+   Persistent or ephemeral Codex run
+              |
+       +------+------------------+
+       |                         |
+       v                         v
+Approved local projects   Memory, skills, schedules,
+and allowlisted tools     feedback, and bounded state
+       |                         |
+       +------------+------------+
+                    v
+              Final result
+```
+
+Interactive work continues a persisted Codex thread. Scheduled work runs ephemerally so background checks do not pollute that conversation. The queue executes one task at a time and survives service restarts.
 
 ## Quick start
 
@@ -62,9 +83,9 @@ This is a focused personal agent, not a general-purpose bot platform. One channe
 
 - macOS
 - Python 3.11 or newer
-- [Codex desktop](https://openai.com/codex/) installed at `/Applications/Codex.app` with Codex CLI 0.138.0 or newer
+- [Codex desktop](https://openai.com/codex/) with Codex CLI 0.138.0 or newer
 - An active Codex login
-- A Telegram bot token created with [BotFather](https://t.me/BotFather)
+- A bot token created with [BotFather](https://t.me/BotFather)
 
 ### 1. Clone
 
@@ -73,254 +94,81 @@ git clone https://github.com/Younghegalian/codeshark.git Codex-codeshark
 cd Codex-codeshark
 ```
 
-Codex-codeshark is currently installed from source; it is not published to PyPI. Packaged
-GitHub release artifacts use `~/.codex-codeshark/` for private configuration and runtime data
-unless `CODEX_CODESHARK_HOME` is set.
-
-### 2. Set up and pair Telegram
+### 2. Configure the agent
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark setup
 ```
 
-The setup flow:
+The guided setup verifies Codex, stores the bot token in macOS Keychain, pairs one administrator, creates the isolated runtime profiles, and writes the private local configuration.
 
-1. Verifies the existing Codex login.
-2. Accepts the BotFather token through hidden input.
-3. Stores the token in macOS Keychain.
-4. Displays a one-time pairing command such as `/pair A1B2C3D4`.
-5. Accepts that command from one Telegram private chat within three minutes.
-6. Creates the local configuration, administrator profile, and isolated group runtime.
-7. Registers separate English command menus for private and group chats.
+See the [chat interface guide](docs/telegram.md) for pairing, commands, optional group access, and delivery troubleshooting.
 
-Paste only the BotFather token at the hidden prompt. Do not paste the BotFather message or a shell command.
-
-### 3. Diagnose the installation
+### 3. Verify and start
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark doctor
+PYTHONPATH=src python3 -m codex_codeshark start
+PYTHONPATH=src python3 -m codex_codeshark service-status
 ```
 
-A healthy installation reports `PASS` for:
-
-- Local configuration
-- Telegram token in Keychain
-- Telegram API access
-- Codex login
-- Codex CLI permission-profile support
-- Administrator Codex profile
-- Isolated group runtime
-- Effective Codex model
-- MCP allowlist consistency
-
-### 4. Run it
-
-Foreground mode is useful for the first test:
+Use foreground mode for the first test if you prefer:
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark run
 ```
 
-Send `/status` to the bot, then stop the foreground process with `Ctrl+C`.
-
-For an always-on gateway, install and start the macOS LaunchAgent:
+Service operations use the same CLI:
 
 ```bash
-PYTHONPATH=src python3 -m codex_codeshark start
-```
-
-Manage and inspect it with the same CLI:
-
-```bash
-PYTHONPATH=src python3 -m codex_codeshark service-status
 PYTHONPATH=src python3 -m codex_codeshark logs --lines 100
 PYTHONPATH=src python3 -m codex_codeshark restart
 PYTHONPATH=src python3 -m codex_codeshark stop
 ```
 
-The compatibility scripts remain available for direct install and removal:
+## Memory that compounds
 
-```bash
-python3 scripts/install_launch_agent.py
-python3 scripts/uninstall_launch_agent.py
-```
+After a successful private task, the agent can identify a durable preference, working pattern, project fact, or reusable procedure. Approved memories become searchable context; approved skills are selected by relevance and loaded only when needed.
 
-### Optional: enable one Telegram group
+Automatic learning is evidence-bound. An exact, non-secret statement from the current administrator request may be applied immediately. Inferred or transformed candidates remain pending for review. One-off details, speculation, credentials, and unnecessary sensitive data are excluded.
 
-For natural-language mentions, use BotFather's `/setprivacy` command to **disable Privacy Mode** for this bot. Telegram's [privacy-enabled bot rules](https://core.telegram.org/bots/faq#what-messages-will-my-bot-get) do not deliver ordinary mention messages; the gateway still discards every group message that does not explicitly contain the bot username. Then add the bot to a group and send:
-
-```text
-/enable_group@YourBotUsername
-@YourBotUsername Explain what a Python context manager does
-```
-
-Only the paired administrator can enable or disable a group. Group members use a normal message containing `@YourBotUsername`; unmentioned messages are ignored after receipt. Each member's six newest successful exchanges are reused only for that same member in that same group and expire after 30 days. Disable access in the group with `/disable_group@YourBotUsername`, or from the administrator's private chat with `/disable_group CHAT_ID`. Disabling a group also deletes its stored participant context. `/groups` lists the current allowlist.
-
-Disabling Privacy Mode means Telegram delivers group messages to the bot process. Codex-codeshark does not queue, store, or answer unmentioned messages. If you prefer Telegram not to deliver them at all, keep Privacy Mode enabled and group mention mode will not work.
+Stable names update existing records rather than creating unbounded duplicates. Usage and explicit positive or negative feedback help rank equally relevant knowledge. Guest and scheduled runs never feed the learning loop.
 
 ## Security defaults
 
-Codex-codeshark connects an agent runtime to a real messaging surface. Treat every inbound message as untrusted until the pairing and policy checks have accepted it.
+Connecting an agent to local projects deserves a small, inspectable trust boundary:
 
-- Exactly one Telegram user ID is the administrator.
-- Groups are denied by default and can be enabled only by that paired administrator.
-- Enabled groups accept only text that explicitly mentions the bot; unmentioned text, attachments, and control commands from guests are ignored.
-- The BotFather token is stored in macOS Keychain, not in project files.
-- The Codex child process receives a strict environment allowlist; Telegram, OpenAI API,
-  cloud, GitHub, and SSH-agent credentials from the parent are not forwarded.
-- Telegram cannot choose the workspace path or pass arbitrary Codex CLI flags.
-- Unapproved administrator tasks are forced into `sandbox_mode = "read-only"` with network, MCP, apps, browser/computer control, and extra writable roots disabled. Requests that may mutate state wait for `/approve`; only the approved run receives the configured `workspace-write`, network, MCP, and `delegated_roots` capabilities.
-- Guest requests use a separate Codex home, an empty workspace outside the repository, an ephemeral session, and a least-privilege [Codex permission profile](https://learn.chatgpt.com/docs/permissions) that grants read access only to that empty workspace and minimal runtime files.
-- Guest web search, network, apps, browser/computer control, MCP servers, memories, multi-agent execution, and image generation are disabled. The isolated Codex state is cleaned after each request.
-- The gateway retains only bounded, requester-scoped group exchanges for conversational continuity. They are never used for administrator learning and are excluded from migration exports.
-- Codex network access is disabled by default and explicitly set on every child process.
-- Attachment paths are generated by the gateway, size-limited, privately stored, and confined to `workspace/inbox/`.
-- Only one Codex task runs at a time, with cancellation and a configurable timeout.
-- Requests classified as destructive or externally mutating wait for explicit approval.
-- Interrupted approved tasks require approval again after restart.
-- The LaunchAgent runs a versioned private source snapshot under `~/Library/Application Support/Codex-codeshark/`, rather than importing executable code from a delegated project tree. Runtime directories and persisted data are owner-only.
-- Every configured MCP server must be represented in the gateway policy.
-- Servers without an explicit tool allowlist are disabled.
+- Exactly one paired administrator receives sessions, memory, tools, and control commands.
+- Unapproved requests run read-only with network, MCP, apps, browser control, and extra writable roots disabled.
+- Potentially mutating work waits for explicit approval; only the approved run receives configured write and tool capabilities.
+- Project roots are fixed in local configuration and can never be supplied by a remote request.
+- The child process receives a strict environment allowlist; parent credentials and SSH-agent sockets are not forwarded.
+- Network access is disabled by default and set explicitly for every run.
+- MCP servers and tools are disabled unless represented in the local allowlist; inventory mismatches fail closed.
+- Attachments are size-limited, privately stored, and confined to the agent inbox.
+- Guest requests use a separate Codex home, an empty read-only workspace, an ephemeral session, and no personal context or tools.
+- Queues, sessions, memories, skills, feedback, schedules, attachments, and failed deliveries all have retention bounds.
+- The background service runs a private versioned source snapshot instead of importing executable code from a delegated project tree.
 
-The administrator-side text classifier and injected execution policy are defense-in-depth controls. Group filesystem and network restrictions are enforced separately by the Codex permission profile. Keep credential-bearing MCP tools disabled unless required, do not enable unknown groups, and do not expose this bot as a public service. Enable `codex_network_access` only when an administrator task genuinely needs outbound access.
+See [SECURITY.md](SECURITY.md) for the full threat boundary, credential handling, and vulnerability reporting policy.
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting and the supported-version policy.
+## Configuration and tool policy
 
-## How it works
+`setup` writes a gitignored `config.local.toml`. Remote requests cannot change its paths or execution policy.
 
-```text
-Administrator private chat                 Enabled Telegram group
-        |                                           |
-        v                                           v
-Paired user ID + capability approval gate   Group allowlist + explicit @mention
-        |                                           |
-        v                                           v
-Session + active memory + learned skills    Requester context + isolated Codex home
-        |                                           |
-        v                                           v
-read-only or approved delegated writes     Empty read-only workspace; no tools/network
-        |                                           |
-        +----------------> final replies <----------+
-```
-
-Telegram is the authenticated transport and control plane. Codex performs reasoning and tool execution. Administrator writes are confined to `workspace/` plus `delegated_roots`; `read_only_roots` remains available for inspection-only locations. Group members never enter that runtime.
-
-## Telegram command reference
-
-### Sessions and tasks
-
-| Command | Purpose |
-|---|---|
-| Plain text | Queue a task in the current interactive Codex session; only the final result is sent. |
-| Photo or document | Save the attachment under `workspace/inbox/` and queue the caption as its task. |
-| `/status` | Show active work, queue depth, session capacity, and stored item counts. |
-| `/tasks` | List recent persistent task records. |
-| `/cancel` | Cancel the active Codex process or the oldest queued task. |
-| `/new` | Permanently delete the current Codex session and start fresh. |
-
-### Group access
-
-| Command | Who can use it | Purpose |
-|---|---|---|
-| `/enable_group` | Paired administrator, in the group | Allow that group to send restricted mention requests. |
-| `/disable_group` | Paired administrator, in the group | Revoke access immediately. |
-| `/group_status` | Paired administrator, in the group | Show whether that group is enabled. |
-| `@BotUsername REQUEST` | Any member of an enabled group | Continue that member's own bounded conversation in an isolated, read-only runtime. |
-| `/groups` | Paired administrator, private chat | List enabled group IDs and titles. |
-| `/disable_group CHAT_ID` | Paired administrator, private chat | Revoke one group without entering it. |
-
-### Memory, skills, and feedback
-
-| Command | Purpose |
-|---|---|
-| `/remember TEXT` | Explicitly store a long-term memory. |
-| `/memories` | List learned long-term memories. |
-| `/forget ID` | Delete a long-term memory. |
-| `/recall QUERY` | Search approved memories and skills with provenance and quality counters. |
-| `/review_memories` | List never-used, stale, or negatively rated memories for review. |
-| `/learn memory TEXT` | Immediately add or update a memory. |
-| `/learn skill NAME \| PROCEDURE` | Immediately add or update a reusable skill. |
-| `/learning` | Audit recent automatic learning events and pending proposals. |
-| `/approve ID` | Approve a risky task, risky scheduled job, or pending learning proposal. |
-| `/reject ID` | Reject a pending risky item or learning proposal. |
-| `/skills` | List approved local skills. |
-| `/forget_skill ID` | Delete an approved skill. |
-| `/good [NOTE]` | Positively rate the last successful task. |
-| `/bad [REASON]` | Negatively rate the last successful task. |
-
-### Delivery recovery
-
-| Command | Purpose |
-|---|---|
-| `/deliveries` | List final replies that Telegram did not accept or whose delivery was ambiguous. |
-| `/retry_delivery ID` | Explicitly retry one failed reply and purge its stored text after success. |
-
-### Automation and policy
-
-| Command | Purpose |
-|---|---|
-| `/remind MINUTES REQUEST` | Run a request once after a delay. |
-| `/heartbeat MINUTES REQUEST` | Run a periodic check. |
-| `/cron EXPRESSION \| REQUEST` | Run a request on a local-time five-field cron schedule. |
-| `/jobs` | List scheduled jobs. |
-| `/pause ID` | Pause a scheduled job. |
-| `/resume_job ID` | Resume a paused scheduled job. |
-| `/delete_job ID` | Delete a scheduled job. |
-| `/mcp` | Show the effective MCP server and tool policy. |
-| `/help` | Show the command summary. |
-
-## Active automatic learning
-
-After every successful private administrator task, the model proactively evaluates the current conversation and accumulated session context. It independently decides whether the interaction reveals a high-value durable preference, working pattern, personal or project fact, or reusable procedure. No `/learn` command is required. One-off details, speculation, secrets, credentials, and unnecessary sensitive data are explicitly excluded.
-
-When learning is warranted, the model appends a hidden structured record. The gateway removes it from the Telegram response and records an audit event. A candidate is applied automatically only when its content is an exact, non-secret quote from the current authenticated administrator request. Inferred, transformed, session-summary, or otherwise ungrounded candidates remain quarantined as `pending` until `/approve lN` or `/reject lN`.
-
-On upgrade, previously auto-applied private-task candidates linked to a task but lacking a provenance record are moved back to `pending`; their matching learned memory or skill is removed until you review it. This avoids treating old model output as trusted instructions.
-
-```text
-Task succeeds
-    -> model independently evaluates the context
-    -> no durable pattern: no change
-       durable pattern: propose memory/skill with source evidence
-    -> exact current-request evidence: apply and record
-       otherwise: quarantine for administrator review
-```
-
-`/learning` shows the recent audit history. `/memories`, `/skills`, `/forget`, and `/forget_skill` remain the administrator's inspection and deletion controls. A stable memory title or skill name updates the existing record in place instead of creating unbounded copies. Learned memories become durable context; learned skills are selected by keyword relevance and loaded only when needed. Usage and `/good` or `/bad` feedback break ties between equally relevant skills. Group requests and scheduled jobs never feed this learning loop.
-
-## Sessions and scheduled work
-
-Interactive Telegram requests continue the current persisted Codex session. The session ID and turn count are stored in `runtime/state.json`.
-
-When `max_session_turns` is reached, Codex proposes a durable summary and queues it for review. The gateway deletes the old Codex session only after the proposal is safely persisted. If queuing or deletion fails, the existing session is kept.
-
-Scheduled jobs are always ephemeral. They do not create or continue Codex sessions. A recurring job cannot enqueue another run while its previous run is active, preventing an unbounded backlog.
-
-## Configuration and MCP policy
-
-`setup` creates a gitignored `config.local.toml` containing installation-specific values:
-
-- The paired Telegram user ID
-- The fixed workspace path
-- The Codex binary, profile, and bot-specific model
-- Polling, timeout, queue, session, and memory limits
-- The attachment size limit and explicit Codex network policy
-- Server-controlled read-only and delegated writable project roots
-- The MCP server inventory and per-server tool allowlist
-
-It does not contain the BotFather token or conversation transcripts. It is still private because it includes a Telegram user ID and local filesystem paths.
-
-See [config.example.toml](config.example.toml) for the complete schema.
-
-For example, this lets the private administrator work across local projects as a delegated development agent:
+Delegate one or more local project roots:
 
 ```toml
 delegated_roots = ["/Users/yourname/workspace"]
 ```
 
-`codex_model` pins the model for both private and isolated group tasks. The generated configuration currently uses `gpt-5.5`; `/status` and `doctor` report the effective model. The group runtime uses that same model without loading the administrator's configuration, memories, or project instructions.
+Keep read-only inspection roots separate:
 
-### MCP policy example
+```toml
+read_only_roots = ["/Users/yourname/Documents/reference"]
+```
+
+MCP access is allowlist-based:
 
 ```toml
 [mcp_policy]
@@ -328,94 +176,60 @@ known_servers = ["github", "docs"]
 
 [mcp_policy.allowed_tools]
 docs = ["search", "fetch"]
-# github is known but disabled for this gateway
+# github is known but disabled
 ```
 
-At setup time, MCP server names found in the global Codex configuration and the `codex-codeshark` profile are copied into `known_servers`. No MCP tools are enabled automatically. Startup fails closed when the live MCP inventory and local policy do not match.
+Startup fails when the live MCP inventory and local policy do not match. No server or tool is enabled automatically. See [config.example.toml](config.example.toml) for the full schema.
 
-## Data retention
+## Bounded state and migration
 
-Codex-codeshark stores enough state to resume useful work without building an unbounded duplicate transcript archive.
+The agent stores only what it needs to resume useful work:
 
-| Store | Retention policy |
+| Store | Bound |
 |---|---|
-| `runtime/state.json` | Current session ID, turn count, and Telegram update offset only. |
-| Interactive Codex session | Deleted and rotated at `max_session_turns` after its durable summary is learned. |
-| Scheduled Codex runs | Ephemeral; no Codex session is stored. |
-| Group Codex runs | Ephemeral; isolated runtime databases and shell snapshots are removed after each request. |
-| Group requester context | Six successful exchanges per `(group, requester)`, 30-day expiry, 1,000 rows globally; deleted when the group is disabled and excluded from migration. |
-| Enabled group allowlist | Stored locally in SQLite; maximum 20 groups; excluded from personal-data migration. |
-| Task records in `runtime/agent.db` | Raw prompts are cleared on terminal status; 200 terminal records are retained. |
-| Automatic learning audit | Up to 200 processed events plus at most 100 pending proposals. |
-| Long-term memory | 12,000 characters by default; 1,000 characters per item. |
-| Approved skills | Up to 100 skills; 8,000 characters per skill. |
-| Scheduled jobs | Up to 100 active jobs and 200 terminal records. |
-| Failed Telegram deliveries | Up to 100 failed replies; successful retries clear the stored text. |
-| Recall index and quality counters | Approved memories and skills only; no unrestricted transcript content. |
-| `runtime/feedback.jsonl` | Rotates at 1 MB and retains the current file plus one previous file. |
-| `workspace/inbox/` | The 50 newest gateway-managed attachment files; gitignored and excluded from migration archives. |
+| Interactive session | Rotated at `max_session_turns` after a durable summary proposal is persisted. |
+| Scheduled and guest runs | Ephemeral; their Codex sessions are not retained. |
+| Task history | Raw prompts are cleared at terminal status; 200 terminal records remain. |
+| Long-term memory | 12,000 characters by default, with 1,000 characters per item. |
+| Skills | At most 100 approved skills, up to 8,000 characters each. |
+| Scheduled jobs | At most 100 active jobs and 200 terminal records. |
+| Attachments | The 50 newest gateway-managed files. |
+| Feedback | Rotates at 1 MB and retains one previous file. |
 
-The gateway does not duplicate full conversation transcripts and does not delete sessions created by other Codex projects or the Codex desktop app.
-
-## Personal data migration
-
-Create a versioned, checksummed archive:
+Export portable personal data before moving machines or performing a major upgrade:
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark export-data \
   "$HOME/codeshark-personal-data.codeshark.zip"
 ```
 
-The archive includes learned memories and skills, their recall provenance and quality counters, task ratings, learning audit records, scheduled jobs, and administrator task metadata. It excludes the Telegram token, local configuration, Codex session files, enabled-group authorization, group participant context, group request records, update offsets, failed-delivery payloads, attachments, and runtime logs. A migrated installation therefore starts with no enabled groups.
-
-Archives are created with mode `0600` and may contain Telegram chat IDs and personal content. Keep them private and never commit them.
-
-On a new Mac, clone the repository and run `setup` first. Then import:
+Import it after cloning and running `setup` on the new Mac:
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark import-data \
   "$HOME/codeshark-personal-data.codeshark.zip" --force
 ```
 
-Queued one-time tasks are imported as cancelled, and active scheduled jobs are imported as paused. Review jobs with `/jobs` before resuming them.
-
-## Troubleshooting
-
-Start every diagnosis with:
-
-```bash
-PYTHONPATH=src python3 -m codex_codeshark doctor
-```
-
-| Symptom | Resolution |
-|---|---|
-| Invalid bot token | Rerun `setup` and paste only the token shown by BotFather. |
-| Telegram TLS verification failure | The client falls back to the verified macOS `/etc/ssl/cert.pem` bundle without disabling TLS verification. |
-| MCP policy mismatch | Add every globally or profile-configured server to `mcp_policy.known_servers`. |
-| Missing restricted profile | Rerun `setup` to create the `codex-codeshark` profile. |
-| LaunchAgent is not running | Run `PYTHONPATH=src python3 -m codex_codeshark start`, then inspect `logs`. |
-| Bot does not answer | Run `doctor`, confirm the LaunchAgent state, then check that the message came from the paired private chat. |
-| Group mention is ignored | Confirm the administrator enabled the group, disable BotFather Privacy Mode, and send `@YourBotUsername REQUEST`. |
+Archives are versioned, checksummed, created with mode `0600`, and exclude tokens, local configuration, Codex session files, runtime logs, attachments, and guest authorization. They still contain personal content and local paths, so keep them private.
 
 ## Project layout
 
 ```text
 Codex-codeshark/
-├── assets/                  # Public project artwork
-├── scripts/                 # macOS LaunchAgent management
-├── src/codex_codeshark/     # Gateway, queue, policy, memory, and migration code
+├── assets/                  # Project artwork
+├── docs/                    # Interface and operational guides
+├── scripts/                 # macOS service helpers
+├── src/codex_codeshark/     # Queue, runtime, policy, memory, and migration
 ├── tests/                   # Offline standard-library unit tests
-├── workspace/               # Only remote-writable project area
+├── workspace/               # Private agent workspace and inbox
 ├── config.example.toml      # Public configuration schema
 ├── config.local.toml        # Private installation config, gitignored
-└── runtime/                 # Private state, database, skills, feedback, and logs
+└── runtime/                 # Private state, database, skills, and logs
 ```
-
-The guest runtime lives separately under `~/Library/Application Support/Codex-codeshark/group/` so project and global `AGENTS.md`, memories, plugins, and custom skills are not inherited. Its `auth.json` is a symlink to the existing Codex login; credentials are not copied into the repository.
 
 ## Development
 
-Create an isolated environment if desired, then install the local package:
+Create an isolated environment if desired:
 
 ```bash
 python3 -m venv .venv
@@ -429,19 +243,19 @@ Run the offline test suite:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-Run the live environment diagnostic separately:
+Run the live installation diagnostic separately:
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark doctor
 ```
 
-Tests never call Telegram or OpenAI networks. `doctor` intentionally checks the configured live installation.
+Tests never call messaging or OpenAI networks. `doctor` intentionally verifies the configured live installation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Upgrading
 
-Stop the service, update the source tree, rerun the offline checks, and restart. Restarting deploys a fresh versioned service snapshot:
+Stop the service, update the source, run the checks, and start it again:
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark stop
@@ -451,33 +265,23 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 PYTHONPATH=src python3 -m codex_codeshark start
 ```
 
-SQLite schema additions are applied on startup. Personal data remains in `runtime/`; create an `export-data` archive before major upgrades.
-
-Maintainers publish releases from a signed, GitHub-verified annotated tag whose name matches the versions in `pyproject.toml` and `src/codex_codeshark/__init__.py`:
-
-```bash
-python3 scripts/release_check.py --tag v0.1.0
-git tag -s v0.1.0 -m "Codex-codeshark v0.1.0"
-git push origin v0.1.0
-```
-
-The release workflow verifies the signature and version, runs the full test suite, builds source and wheel packages, and publishes them to GitHub Releases.
+Restarting deploys a fresh private source snapshot. SQLite schema additions are applied automatically and personal data remains in `runtime/`.
 
 ## Project status
 
-Codex-codeshark is an early alpha with a deliberately narrow scope. The initial public-readiness milestones are implemented:
+Codex-codeshark is an early alpha with a deliberately narrow scope. The core personal-agent path is implemented:
 
-- [x] Hardened child process environment and explicit network policy.
-- [x] First-class macOS service CLI and sanitized log inspection.
-- [x] Telegram rate-limit handling and bounded failed-delivery recovery.
-- [x] Searchable cross-session recall with provenance.
-- [x] Usage counters, memory review, and feedback-aware skill ranking.
-- [x] Safe Telegram document and image intake confined to `workspace/`.
-- [x] Administrator-enabled Telegram groups with isolated natural-language mention execution.
-- [x] Administrator development access to server-configured delegated project roots.
-- [x] Signed-tag validation, packaged release artifacts, and upgrade guidance.
+- [x] Persistent sessions, bounded rotation, and durable task recovery
+- [x] Delegated local project work with capability approval
+- [x] Scheduled ephemeral jobs and overlap protection
+- [x] Evidence-bound automatic learning and searchable recall
+- [x] Feedback-aware skill ranking and memory review
+- [x] Private attachment intake and failed-result recovery
+- [x] Isolated, read-only guest conversations
+- [x] First-class macOS service management and diagnostics
+- [x] Signed release checks and portable personal-data migration
 
-Additional administrator accounts, additional messaging channels, and multi-agent orchestration are not current goals.
+Additional administrators, additional messaging channels, and multi-agent orchestration are not current goals.
 
 ## Contributing
 
