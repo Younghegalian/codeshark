@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from .secure_io import ensure_private_directory, ensure_private_file
+
 
 TASK_STATUSES = {
     "awaiting_approval",
@@ -74,8 +76,11 @@ class GroupChatRecord:
 
 class RiskPolicy:
     _PATTERN = re.compile(
-        r"(?:\b(?:delete|remove|deploy|publish|post|send|email|pay|purchase|buy|"
-        r"merge|release|upload|push)\b|삭제|제거|배포|게시|발행|전송|메일|결제|구매|"
+        r"(?:\b(?:delete|remove|erase|alter|write|edit|modify|change|fix|implement|"
+        r"refactor|rename|move|copy|overwrite|run|execute|build|install|start|restart|"
+        r"stop|test|deploy|publish|post|send|email|pay|purchase|buy|merge|release|"
+        r"upload|push)\b|삭제|제거|지워|수정|변경|고쳐|구현|리팩터|이동|복사|덮어쓰|"
+        r"작성|실행|테스트|빌드|설치|시작|재시작|중지|배포|게시|발행|전송|메일|결제|구매|"
         r"병합|릴리스|업로드|푸시|"
         r"\b(?:create|close|comment|reply|invite)\b.{0,40}"
         r"\b(?:issue|pull request|event|message|email)\b|"
@@ -161,11 +166,15 @@ class AgentStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.path.parent)
+        ensure_private_file(self.path)
         self._initialize()
+        ensure_private_file(self.path)
 
     def _connect(self) -> sqlite3.Connection:
+        ensure_private_file(self.path)
         connection = sqlite3.connect(self.path, timeout=5)
+        ensure_private_file(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 5000")
         return connection

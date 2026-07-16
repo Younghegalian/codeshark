@@ -231,7 +231,7 @@ class TelegramAPI:
             {"command": "review_memories", "description": "Review stale or low-quality memories"},
             {"command": "learn", "description": "Apply a memory or skill"},
             {"command": "learning", "description": "Audit automatic learning"},
-            {"command": "approve", "description": "Approve risky or legacy pending work"},
+            {"command": "approve", "description": "Approve risky or pending learning work"},
             {"command": "reject", "description": "Reject learning or risky work"},
             {"command": "skills", "description": "List learned skills"},
             {"command": "forget_skill", "description": "Delete a learned skill"},

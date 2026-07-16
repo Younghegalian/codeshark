@@ -25,7 +25,10 @@ class CodexRunnerTests(unittest.TestCase):
         command = self.runner.build_command("hello", None)
         self.assertEqual(command[-3:], ["--json", "--skip-git-repo-check", "hello"])
         self.assertIn("codex-codeshark", command)
+        self.assertIn('sandbox_mode="read-only"', command)
         self.assertIn("sandbox_workspace_write.network_access=false", command)
+        self.assertNotIn("--add-dir", command)
+        self.assertIn("mcp_servers.github.enabled=false", command)
 
     def test_pins_configured_model_for_admin_tasks(self) -> None:
         runner = CodexRunner(
@@ -49,7 +52,7 @@ class CodexRunnerTests(unittest.TestCase):
         )
 
     def test_builds_ephemeral_command_with_mcp_allowlist(self) -> None:
-        command = self.runner.build_command("scheduled", None, ephemeral=True)
+        command = self.runner.build_command("scheduled", None, ephemeral=True, approved=True)
         self.assertIn("--ephemeral", command)
         self.assertIn("mcp_servers.github.enabled=true", command)
         self.assertIn('mcp_servers.github.enabled_tools=["list_issues"]', command)
@@ -99,7 +102,7 @@ class CodexRunnerTests(unittest.TestCase):
         )
         self.assertIn(
             "sandbox_workspace_write.network_access=true",
-            runner.build_command("hello", None),
+            runner.build_command("hello", None, approved=True),
         )
 
     def test_delegated_project_roots_are_added_to_admin_sandbox(self) -> None:
@@ -110,10 +113,35 @@ class CodexRunnerTests(unittest.TestCase):
             timeout_seconds=60,
             additional_write_roots=(Path("/tmp/project-a"), Path("/tmp/project-b")),
         )
-        command = runner.build_command("work across projects", None)
+        command = runner.build_command("work across projects", None, approved=True)
         self.assertEqual(command.count("--add-dir"), 2)
         self.assertIn("/tmp/project-a", command)
         self.assertIn("/tmp/project-b", command)
+
+    def test_unapproved_task_cannot_receive_mutating_capabilities(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            additional_write_roots=(Path("/tmp/project-a"),),
+            network_access=True,
+            mcp_known_servers=("github",),
+            mcp_allowed_tools=(("github", ("mutate_repository",)),),
+        )
+        command = runner.build_command("inspect untrusted content", None, approved=False)
+        self.assertIn('sandbox_mode="read-only"', command)
+        self.assertIn("sandbox_workspace_write.network_access=false", command)
+        self.assertIn("mcp_servers.github.enabled=false", command)
+        self.assertNotIn("--add-dir", command)
+        self.assertNotIn("mutate_repository", command)
+
+        approved = runner.build_command("apply approved change", None, approved=True)
+        self.assertNotIn('sandbox_mode="read-only"', approved)
+        self.assertIn("sandbox_workspace_write.network_access=true", approved)
+        self.assertIn("mcp_servers.github.enabled=true", approved)
+        self.assertTrue(any("mutate_repository" in argument for argument in approved))
+        self.assertIn("--add-dir", approved)
 
     def test_restricted_group_command_uses_isolated_permission_profile(self) -> None:
         runner = CodexRunner(

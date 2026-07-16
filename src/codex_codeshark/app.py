@@ -17,6 +17,7 @@ from .learning import (
     LearningStore,
     ProposedLearning,
     SkillStore,
+    can_auto_approve_learning,
     extract_learning_candidate,
 )
 from .memory import (
@@ -44,7 +45,7 @@ Plain text: submit a task to the current Codex session
 /learn memory TEXT: immediately store or update a memory
 /learn skill NAME | PROCEDURE: immediately store or update a reusable skill
 /learning: audit automatic learning history
-/approve ID, /reject ID: review risky work or legacy learning proposals
+/approve ID, /reject ID: review risky work or pending learning proposals
 /skills, /forget_skill ID: manage learned skills
 /tasks: show recent persistent tasks
 /deliveries, /retry_delivery ID: inspect or retry failed replies
@@ -115,6 +116,7 @@ class AgentApp:
         self.skills = SkillStore(runtime_dir / "skills")
         self.recall = RecallStore(database_path)
         self.store = AgentStore(database_path)
+        self._quarantine_legacy_automatic_learning()
         self.risk_policy = RiskPolicy()
         prepare_group_runtime(config)
         _configured_model, reasoning_effort = configured_codex_runtime(
@@ -140,6 +142,18 @@ class AgentApp:
         self._last_completed_task: CompletedTask | None = None
         self._wake_worker = threading.Event()
         self._bot_username: str | None = None
+
+    def _quarantine_legacy_automatic_learning(self) -> None:
+        for candidate in self.learning.list_legacy_automatic_approved():
+            if candidate.kind == "memory":
+                self.memory.forget_matching(candidate.title, candidate.content)
+            else:
+                self.skills.forget_matching(candidate.title, candidate.content)
+            if candidate.source_task_id:
+                self.recall.delete_by_source_task_id(candidate.source_task_id)
+            if not self.learning.quarantine_legacy(candidate.id):
+                raise RuntimeError(f"could not quarantine legacy learning candidate {candidate.id}")
+            LOGGER.warning("quarantined legacy automatic learning candidate=%s", candidate.id)
         self._sync_recall_index()
 
     def run_forever(self) -> None:
@@ -545,8 +559,12 @@ class AgentApp:
                 selected_skills,
                 external_action_approved=task.approved,
                 task_id=task.id,
-                read_only_roots=self.config.read_only_roots,
-                delegated_roots=self.config.delegated_roots,
+                read_only_roots=(
+                    self.config.read_only_roots
+                    if task.approved
+                    else (*self.config.read_only_roots, *self.config.delegated_roots)
+                ),
+                delegated_roots=self.config.delegated_roots if task.approved else (),
             )
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
@@ -556,6 +574,7 @@ class AgentApp:
             thread_id,
             ephemeral=task.ephemeral,
             restricted=task.restricted,
+            approved=task.approved,
         )
         successful = result.exit_code == 0 and not result.cancelled and not result.timed_out
         if task.restricted:
@@ -564,7 +583,11 @@ class AgentApp:
         else:
             clean_message, proposed = extract_learning_candidate(result.message)
         if proposed and successful and task.source == "telegram":
-            self._auto_apply_learning(proposed, source_task_id=task.id)
+            self._auto_apply_learning(
+                proposed,
+                source_task_id=task.id,
+                source_prompt=task.prompt,
+            )
         notices = [item for item in (rotation_notice,) if item]
         if clean_message and notices:
             clean_message += "\n\n" + "\n".join(notices)
@@ -583,7 +606,12 @@ class AgentApp:
                 task.prompt,
                 clean_message,
             )
-        self._deliver_result(task.chat_id, result, persist_session=not task.ephemeral)
+        self._deliver_result(
+            task.chat_id,
+            result,
+            persist_session=not task.ephemeral,
+            restricted=task.restricted,
+        )
         if not task.restricted:
             with self._status_lock:
                 self._last_completed_task = (
@@ -632,10 +660,8 @@ class AgentApp:
                 content=proposed_content,
                 source_task_id=None,
             )
-            self._apply_learning_candidate(candidate)
-            self.learning.set_status(candidate.id, "approved")
         except (OSError, RuntimeError, ValueError):
-            LOGGER.exception("session rotation learning failed; keeping current session")
+            LOGGER.exception("session rotation learning could not be queued; keeping current session")
             return None
         try:
             self.runner.delete_session(snapshot.codex_thread_id)
@@ -645,7 +671,7 @@ class AgentApp:
         self.state.set_codex_thread_id(None)
         return (
             f"The session reached its capacity and was rotated. "
-            "Its durable patterns were learned automatically."
+            f"Its durable summary was queued as {candidate.id} for review."
         )
 
     def _apply_learning_candidate(self, candidate: LearningCandidate) -> str:
@@ -676,6 +702,7 @@ class AgentApp:
         proposed: ProposedLearning,
         *,
         source_task_id: str | None,
+        source_prompt: str,
     ) -> str | None:
         try:
             candidate = self.learning.propose(
@@ -684,8 +711,18 @@ class AgentApp:
                 content=proposed.content,
                 source_task_id=source_task_id,
             )
+            if not can_auto_approve_learning(proposed, source_prompt):
+                LOGGER.info(
+                    "quarantined ungrounded learning candidate=%s",
+                    candidate.id,
+                )
+                return None
             source_id = self._apply_learning_candidate(candidate)
-            self.learning.set_status(candidate.id, "approved")
+            self.learning.set_status(
+                candidate.id,
+                "approved",
+                approval_basis="grounded",
+            )
         except (OSError, RuntimeError, ValueError) as exc:
             LOGGER.warning("automatic learning failed: %s", exc)
             return None
@@ -702,6 +739,7 @@ class AgentApp:
         result: RunResult,
         *,
         persist_session: bool,
+        restricted: bool,
     ) -> None:
         if persist_session and result.thread_id:
             self.state.record_codex_turn(result.thread_id)
@@ -712,6 +750,12 @@ class AgentApp:
             self._send_message(chat_id, "The task exceeded its time limit and was stopped.")
             return
         if result.exit_code != 0:
+            if restricted:
+                self._send_message(
+                    chat_id,
+                    "The restricted Codex task failed. Ask the administrator to check local logs.",
+                )
+                return
             details = result.stderr[-1500:] if result.stderr else "No error details were returned."
             self._send_message(chat_id, f"Codex failed (exit {result.exit_code})\n\n{details}")
             return
@@ -815,7 +859,11 @@ class AgentApp:
                 source_task_id=None,
             )
             source_id = self._apply_learning_candidate(candidate)
-            self.learning.set_status(candidate.id, "approved")
+            self.learning.set_status(
+                candidate.id,
+                "approved",
+                approval_basis="manual",
+            )
         except (OSError, RuntimeError, ValueError) as exc:
             self._send_message(chat_id, f"Could not apply the learning: {exc}")
             return
@@ -976,8 +1024,10 @@ class AgentApp:
                                     else "User confirmation"
                                 ),
                                 content=note,
+                                evidence=note,
                             ),
                             source_task_id=completed.id,
+                            source_prompt=note,
                         )
                 except ValueError as exc:
                     message = f"Could not store the rating: {exc}"
@@ -1002,7 +1052,7 @@ class AgentApp:
                 f"Long-term memories: {len(self.memory.list())}",
                 f"Approved skills: {len(self.skills.list())}",
                 "Automatic learning: enabled",
-                f"Pending legacy learning proposals: {len(self.learning.list_pending())}",
+                f"Pending learning proposals: {len(self.learning.list_pending())}",
                 f"Scheduled jobs: {len(self.store.list_schedules())}",
                 f"Enabled groups: {len(self.store.list_groups())}",
                 f"Failed deliveries: {len(self.store.list_failed_deliveries())}",

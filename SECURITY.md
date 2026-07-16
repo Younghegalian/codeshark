@@ -31,7 +31,8 @@ Do not include real Telegram tokens, Codex credentials, personal data, or unrela
 The intended boundaries are:
 
 - One explicitly paired Telegram administrator in a private chat
-- Administrator writes confined to `workspace/` and explicit `delegated_roots` by a `workspace-write` Codex profile
+- Unapproved administrator tasks forced into a read-only Codex sandbox with network, MCP, apps, browser/computer control, and additional writable roots disabled
+- State-changing administrator requests held for explicit approval before receiving the configured `workspace-write`, network, MCP, and `delegated_roots` capabilities
 - Optional administrator-configured read-only roots and writable delegated project roots for trusted private-chat work
 - Group access denied by default and enabled only by the paired administrator
 - Group members limited to explicit bot mentions in an enabled group, with no attachments or control commands
@@ -43,6 +44,7 @@ The intended boundaries are:
 - Bot tokens stored in macOS Keychain and a strict Codex child-environment allowlist
 - Outbound Codex network access disabled by default and explicitly configured per child
 - Size-limited Telegram attachments stored only in the server-controlled workspace
+- A versioned owner-only LaunchAgent source snapshot outside delegated project roots, with owner-only runtime storage and atomic private-file replacement
 
 The administrator-side risk classifier and model instructions are defense-in-depth controls. Guest isolation additionally relies on Codex permission profiles and therefore requires Codex CLI 0.138.0 or newer; startup rejects older versions.
 
@@ -50,4 +52,6 @@ The Codex child receives only basic process, locale, temporary-directory, certif
 
 Group tasks use an isolated Codex home containing only a symlink to the existing Codex authentication file plus Codex-generated caches. The filesystem profile prevents model-generated commands from reading that home. Ephemeral task databases, logs, shell snapshots, and other non-cache state are removed after each group request. The gateway separately stores bounded requester-scoped exchanges for continuity; disabling a group deletes them. Enabled group IDs, participant context, and group request records are deliberately excluded from migration exports.
 
-Private administrator tasks may trigger model-initiated automatic learning. The model is instructed to learn only durable, high-value patterns and to exclude secrets, credentials, speculation, and unnecessary sensitive data. Automatic learning is never sourced from group or scheduled tasks. Administrators can audit events with `/learning` and inspect or delete learned data with `/memories`, `/skills`, `/forget`, and `/forget_skill`.
+Private administrator tasks may trigger model-initiated automatic learning. The model is instructed to learn only durable, high-value patterns and to exclude secrets, credentials, speculation, and unnecessary sensitive data. The gateway automatically applies a candidate only when its content exactly matches non-secret evidence in the current authenticated administrator request. Ungrounded, inferred, or session-summary candidates remain pending for explicit review. Automatic learning is never sourced from group or scheduled tasks. Administrators can audit events with `/learning` and inspect, approve, reject, or delete learned data with `/approve`, `/reject`, `/memories`, `/skills`, `/forget`, and `/forget_skill`.
+
+When upgrading to a provenance-aware release, previously auto-applied private-task candidates linked to a task but without a recorded approval basis are quarantined back to pending review and their matching injected memory or skill is removed. This one-time migration intentionally favors safety over retaining unverified model output.

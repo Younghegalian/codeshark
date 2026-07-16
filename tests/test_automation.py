@@ -12,6 +12,10 @@ class RiskPolicyTests(unittest.TestCase):
         self.assertTrue(policy.requires_approval("deploy to production"))
         self.assertTrue(policy.requires_approval("send this email"))
         self.assertTrue(policy.requires_approval("delete the release"))
+        self.assertTrue(policy.requires_approval("erase every tracked file"))
+        self.assertTrue(policy.requires_approval("alter the branch protection settings"))
+        self.assertTrue(policy.requires_approval("fix the failing test"))
+        self.assertTrue(policy.requires_approval("이 코드 수정해"))
         self.assertFalse(policy.requires_approval("explain the code"))
 
 

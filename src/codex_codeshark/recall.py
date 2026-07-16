@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .secure_io import ensure_private_directory, ensure_private_file
+
 
 @dataclass(frozen=True)
 class RecallEntry:
@@ -27,11 +29,15 @@ class RecallStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(self.path.parent)
+        ensure_private_file(self.path)
         self._initialize()
+        ensure_private_file(self.path)
 
     def _connect(self) -> sqlite3.Connection:
+        ensure_private_file(self.path)
         connection = sqlite3.connect(self.path, timeout=5)
+        ensure_private_file(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 5000")
         return connection
@@ -145,6 +151,14 @@ class RecallStore:
                 (kind, source_id),
             )
             return cursor.rowcount == 1
+
+    def delete_by_source_task_id(self, source_task_id: str) -> int:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM recall_entries WHERE source_task_id = ?",
+                (source_task_id,),
+            )
+            return cursor.rowcount
 
     def search(self, query: str, limit: int = 10) -> list[RecallEntry]:
         tokens = re.findall(r"[0-9A-Za-z가-힣_+-]{2,}", query.lower())

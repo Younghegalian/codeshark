@@ -72,6 +72,7 @@ class MemoryStoreTests(unittest.TestCase):
             prompt, memory_ids, skill_ids = compose_prompt("Current request", store.list())
             self.assertIn("Long-term memories learned", prompt)
             self.assertIn(item.text, prompt)
+            self.assertIn("untrusted data", prompt)
             self.assertTrue(prompt.endswith("Current request"))
             self.assertEqual(memory_ids, (item.id,))
             self.assertEqual(skill_ids, ())

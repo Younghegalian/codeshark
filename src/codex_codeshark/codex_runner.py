@@ -153,6 +153,31 @@ class CodexRunner:
             args.extend(["-c", f"model_reasoning_effort={encoded}"])
         return args
 
+    def _unapproved_config_args(self) -> list[str]:
+        return [
+            "-c",
+            'sandbox_mode="read-only"',
+            "-c",
+            "sandbox_workspace_write.network_access=false",
+            "-c",
+            'web_search="disabled"',
+            "-c",
+            "features.apps=false",
+            "-c",
+            "features.browser_use=false",
+            "-c",
+            "features.computer_use=false",
+            "-c",
+            "features.image_generation=false",
+            "-c",
+            "features.memories=false",
+            "-c",
+            "features.multi_agent=false",
+            "-c",
+            "features.tool_suggest=false",
+            *self._mcp_config_args(restricted=True),
+        ]
+
     def build_command(
         self,
         prompt: str,
@@ -160,6 +185,7 @@ class CodexRunner:
         *,
         ephemeral: bool = False,
         restricted: bool = False,
+        approved: bool = False,
     ) -> list[str]:
         if restricted:
             if thread_id is not None:
@@ -187,21 +213,26 @@ class CodexRunner:
             "-C",
             str(self.workdir),
         ]
-        for root in self.additional_write_roots:
-            base.extend(["--add-dir", str(root)])
+        if approved:
+            for root in self.additional_write_roots:
+                base.extend(["--add-dir", str(root)])
         if self.model:
             base.extend(["--model", self.model])
         if self.model_reasoning_effort:
             encoded = json.dumps(self.model_reasoning_effort)
             base.extend(["-c", f"model_reasoning_effort={encoded}"])
-        base.extend(
-            [
-                "-c",
-                "sandbox_workspace_write.network_access=" + str(self.network_access).lower(),
-                *self._mcp_config_args(),
-                "exec",
-            ]
-        )
+        if approved:
+            base.extend(
+                [
+                    "-c",
+                    "sandbox_workspace_write.network_access="
+                    + str(self.network_access).lower(),
+                    *self._mcp_config_args(),
+                ]
+            )
+        else:
+            base.extend(self._unapproved_config_args())
+        base.append("exec")
         if thread_id:
             flags = ["resume"]
             if ephemeral:
@@ -247,12 +278,14 @@ class CodexRunner:
         *,
         ephemeral: bool = False,
         restricted: bool = False,
+        approved: bool = False,
     ) -> RunResult:
         command = self.build_command(
             prompt,
             thread_id,
             ephemeral=ephemeral,
             restricted=restricted,
+            approved=approved,
         )
         env = self._child_env(restricted=restricted)
         run_workdir = self.restricted_workdir if restricted else self.workdir

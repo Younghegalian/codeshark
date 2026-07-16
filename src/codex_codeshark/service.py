@@ -1,18 +1,29 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from .config import PROJECT_ROOT
+from .secure_io import (
+    atomic_write_bytes,
+    ensure_private_directory,
+    ensure_private_file,
+    read_private_bytes,
+)
 
 LABEL = "com.codeshark.agent"
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+INSTALL_ROOT = Path.home() / "Library" / "Application Support" / "Codex-codeshark" / "app"
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
 _TOKEN_PATTERN = re.compile(r"\b[0-9]{6,}:[A-Za-z0-9_-]+\b")
 
 
@@ -45,16 +56,106 @@ def _wait_for_status(*, running: bool, timeout: float = 5.0) -> ServiceStatus:
     return status
 
 
-def _payload(project_root: Path, python: str) -> dict:
+def _source_digest(source_root: Path, config_data: bytes) -> str:
+    package = source_root / "codex_codeshark"
+    if package.is_symlink() or not package.is_dir():
+        raise ServiceError(f"Codex-codeshark package source is missing: {package}")
+    digest = hashlib.sha256()
+    files = [
+        path
+        for path in package.rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in {".pyc", ".pyo"}
+    ]
+    for path in sorted(files, key=lambda item: item.relative_to(package).as_posix()):
+        if path.is_symlink():
+            raise ServiceError(f"service source must not contain symbolic links: {path}")
+        relative = path.relative_to(package).as_posix().encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        digest.update(path.read_bytes())
+    if not files:
+        raise ServiceError(f"Codex-codeshark package source is empty: {package}")
+    digest.update(b"\0config.local.toml\0")
+    digest.update(config_data)
+    return digest.hexdigest()
+
+
+def _deploy_source(
+    *,
+    source_root: Path,
+    config_path: Path,
+    install_root: Path,
+) -> tuple[Path, Path]:
+    ensure_private_directory(install_root)
+    ensure_private_file(config_path)
+    config_data = read_private_bytes(config_path, max_bytes=1_000_000)
+    version_root = install_root / _source_digest(source_root, config_data)
+    installed_source = version_root / "src"
+    installed_config = version_root / "config.local.toml"
+    if (
+        (installed_source / "codex_codeshark" / "__main__.py").is_file()
+        and installed_config.is_file()
+    ):
+        return installed_source, installed_config
+    staging = Path(tempfile.mkdtemp(prefix=".install-", dir=install_root))
+    try:
+        target = staging / "src" / "codex_codeshark"
+        target.parent.mkdir(mode=0o700)
+        shutil.copytree(
+            source_root / "codex_codeshark",
+            target,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+        )
+        (staging / "config.local.toml").write_bytes(config_data)
+        for path in staging.rglob("*"):
+            if path.is_symlink():
+                raise ServiceError(f"deployed service source contains a symbolic link: {path}")
+            path.chmod(0o700 if path.is_dir() else 0o600)
+        try:
+            os.replace(staging, version_root)
+        except FileExistsError:
+            pass
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    if not (
+        (installed_source / "codex_codeshark" / "__main__.py").is_file()
+        and installed_config.is_file()
+    ):
+        raise ServiceError("failed to deploy the versioned service source")
+    return installed_source, installed_config
+
+
+def _harden_runtime(runtime: Path) -> None:
+    ensure_private_directory(runtime)
+    for path in runtime.rglob("*"):
+        if path.is_symlink():
+            raise ServiceError(f"runtime storage must not contain symbolic links: {path}")
+        path.chmod(0o700 if path.is_dir() else 0o600)
+
+
+def _payload(
+    project_root: Path,
+    python: str,
+    installed_source: Path,
+    installed_config: Path,
+) -> dict:
     runtime = project_root / "runtime"
     return {
         "Label": LABEL,
         "ProgramArguments": [python, "-m", "codex_codeshark", "run"],
-        "WorkingDirectory": str(project_root),
+        "WorkingDirectory": str(installed_source.parent),
         "EnvironmentVariables": {
-            "PYTHONPATH": str(project_root / "src"),
+            "PYTHONPATH": str(installed_source),
+            "CODEX_CODESHARK_HOME": str(project_root),
+            "TELEGRAM_CODEX_CONFIG": str(installed_config),
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONSAFEPATH": "1",
             "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
         },
+        "Umask": 0o077,
         "RunAtLoad": True,
         "KeepAlive": True,
         "ThrottleInterval": 10,
@@ -68,17 +169,27 @@ def install_service(
     project_root: Path = PROJECT_ROOT,
     plist_path: Path = PLIST_PATH,
     python: str = sys.executable,
+    install_root: Path = INSTALL_ROOT,
+    source_root: Path = SOURCE_ROOT,
 ) -> Path:
-    if not (project_root / "config.local.toml").is_file():
+    config_path = project_root / "config.local.toml"
+    if config_path.is_symlink() or not config_path.is_file():
         raise ServiceError("config.local.toml is missing; run setup first")
     runtime = project_root / "runtime"
-    runtime.mkdir(parents=True, exist_ok=True)
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = plist_path.with_suffix(plist_path.suffix + ".tmp")
-    with temporary.open("wb") as handle:
-        plistlib.dump(_payload(project_root, python), handle, sort_keys=False)
-    temporary.chmod(0o600)
-    os.replace(temporary, plist_path)
+    _harden_runtime(runtime)
+    ensure_private_directory(plist_path.parent)
+    installed_source, installed_config = _deploy_source(
+        source_root=source_root,
+        config_path=config_path,
+        install_root=install_root,
+    )
+    atomic_write_bytes(
+        plist_path,
+        plistlib.dumps(
+            _payload(project_root, python, installed_source, installed_config),
+            sort_keys=False,
+        ),
+    )
 
     subprocess.run(
         ["/bin/launchctl", "bootout", _domain(), str(plist_path)],
@@ -116,24 +227,13 @@ def start_service(
     project_root: Path = PROJECT_ROOT,
     plist_path: Path = PLIST_PATH,
     python: str = sys.executable,
+    install_root: Path = INSTALL_ROOT,
 ) -> ServiceStatus:
-    if not plist_path.is_file():
-        install_service(project_root=project_root, plist_path=plist_path, python=python)
-        return _wait_for_status(running=True)
-    current = service_status()
-    if not current.running:
-        result = subprocess.run(
-            ["/bin/launchctl", "bootstrap", _domain(), str(plist_path)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise ServiceError(result.stderr.strip() or result.stdout.strip() or "launchctl bootstrap failed")
-    subprocess.run(
-        ["/bin/launchctl", "kickstart", _service_target()],
-        capture_output=True,
-        check=False,
+    install_service(
+        project_root=project_root,
+        plist_path=plist_path,
+        python=python,
+        install_root=install_root,
     )
     return _wait_for_status(running=True)
 
@@ -152,19 +252,14 @@ def restart_service(
     project_root: Path = PROJECT_ROOT,
     plist_path: Path = PLIST_PATH,
     python: str = sys.executable,
+    install_root: Path = INSTALL_ROOT,
 ) -> ServiceStatus:
-    if not plist_path.is_file():
-        install_service(project_root=project_root, plist_path=plist_path, python=python)
-    else:
-        current = service_status()
-        if current.running:
-            subprocess.run(
-                ["/bin/launchctl", "kickstart", "-k", _service_target()],
-                capture_output=True,
-                check=False,
-            )
-        else:
-            return start_service(project_root=project_root, plist_path=plist_path, python=python)
+    install_service(
+        project_root=project_root,
+        plist_path=plist_path,
+        python=python,
+        install_root=install_root,
+    )
     return _wait_for_status(running=True)
 
 

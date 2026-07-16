@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import PROJECT_ROOT
+from .learning import SkillStore
+from .secure_io import atomic_write_bytes, ensure_private_directory
 
 
 ARCHIVE_FORMAT = "codex-codeshark-personal-data"
@@ -96,12 +98,16 @@ def _stage_personal_data(runtime_dir: Path, staging: Path) -> list[Path]:
 
     for filename in _RUNTIME_FILES:
         source = runtime_dir / filename
+        if source.is_symlink():
+            raise MigrationError(f"personal-data file must not be a symbolic link: {source}")
         if source.is_file():
             destination = target_runtime / filename
             shutil.copy2(source, destination)
             staged.append(destination)
 
     database = runtime_dir / "agent.db"
+    if database.is_symlink():
+        raise MigrationError(f"personal-data database must not be a symbolic link: {database}")
     if database.is_file():
         destination = target_runtime / "agent.db"
         try:
@@ -116,7 +122,13 @@ def _stage_personal_data(runtime_dir: Path, staging: Path) -> list[Path]:
         staged.append(destination)
 
     skills = runtime_dir / "skills"
+    if skills.is_symlink():
+        raise MigrationError(f"personal-data skills must not be a symbolic link: {skills}")
     if skills.is_dir():
+        try:
+            SkillStore(skills)
+        except RuntimeError as exc:
+            raise MigrationError(f"invalid skill index: {exc}") from exc
         for source in sorted(skills.rglob("*")):
             if not source.is_file() or source.is_symlink():
                 continue
@@ -169,7 +181,13 @@ def export_personal_data(
                 "workspace/inbox attachments",
             ],
         }
-        temporary = destination.with_suffix(destination.suffix + ".tmp")
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            dir=destination.parent,
+        )
+        os.close(descriptor)
+        temporary = Path(temporary_name)
         try:
             with zipfile.ZipFile(
                 temporary,
@@ -244,6 +262,12 @@ def _read_and_validate_archive(archive: Path, staging: Path) -> tuple[str, ...]:
     database = staging / "runtime" / "agent.db"
     if database.is_file():
         _sanitize_database(database)
+    skills = staging / "runtime" / "skills"
+    if skills.is_dir():
+        try:
+            SkillStore(skills)
+        except RuntimeError as exc:
+            raise MigrationError(f"invalid imported skill index: {exc}") from exc
     return tuple(sorted(files))
 
 
@@ -254,11 +278,7 @@ def _existing_personal_data(runtime_dir: Path) -> list[Path]:
 
 
 def _replace_file(source: Path, destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(destination.suffix + ".import.tmp")
-    shutil.copy2(source, temporary)
-    temporary.chmod(0o600)
-    os.replace(temporary, destination)
+    atomic_write_bytes(destination, source.read_bytes())
 
 
 def import_personal_data(
@@ -280,7 +300,7 @@ def import_personal_data(
         staging = Path(directory)
         files = _read_and_validate_archive(source, staging)
         staged_runtime = staging / "runtime"
-        destination_runtime.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(destination_runtime)
 
         for filename in (*_RUNTIME_FILES, "agent.db"):
             destination = destination_runtime / filename
@@ -292,7 +312,9 @@ def import_personal_data(
 
         staged_skills = staged_runtime / "skills"
         destination_skills = destination_runtime / "skills"
-        if replace and destination_skills.exists():
+        if replace and destination_skills.is_symlink():
+            destination_skills.unlink()
+        elif replace and destination_skills.exists():
             shutil.rmtree(destination_skills)
         if staged_skills.is_dir():
             shutil.copytree(staged_skills, destination_skills)

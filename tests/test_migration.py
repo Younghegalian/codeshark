@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 import zipfile
@@ -153,6 +154,46 @@ class PersonalDataMigrationTests(unittest.TestCase):
                 bundle.writestr("../../secret", "x")
             with self.assertRaisesRegex(MigrationError, "invalid path"):
                 import_personal_data(archive, runtime_dir=Path(directory) / "target")
+
+    def test_rejects_malicious_imported_skill_index_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "bad-skill.codeshark.zip"
+            external = root / "external.md"
+            external.write_text("sentinel", encoding="utf-8")
+            index = json.dumps(
+                {
+                    "next_id": 2,
+                    "skills": [
+                        {
+                            "id": "s1",
+                            "name": "Injected",
+                            "description": "Injected",
+                            "path": str(external),
+                            "created_at": "2026-01-01T00:00:00+00:00",
+                            "content": "",
+                        }
+                    ],
+                }
+            ).encode("utf-8")
+            name = "runtime/skills/index.json"
+            manifest = {
+                "format": "codex-codeshark-personal-data",
+                "version": 1,
+                "files": {
+                    name: {
+                        "size": len(index),
+                        "sha256": hashlib.sha256(index).hexdigest(),
+                    }
+                },
+            }
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("manifest.json", json.dumps(manifest))
+                bundle.writestr(name, index)
+
+            with self.assertRaisesRegex(MigrationError, "invalid imported skill index"):
+                import_personal_data(archive, runtime_dir=root / "target")
+            self.assertEqual(external.read_text(encoding="utf-8"), "sentinel")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,11 @@
 <div align="center">
-  <img src="assets/codeshark-mascot.png" alt="Codex-codeshark mascot" width="320">
+  <img src="assets/codeshark-mascot.png" alt="Codex-codeshark mascot" width="300">
   <h1>Codex-codeshark</h1>
-  <p><strong>A private, always-on Telegram control plane for your local OpenAI Codex CLI.</strong></p>
+  <p><strong>Your Codex agent, on call from anywhere.</strong></p>
+  <p>
+    Hand off real repo work, recurring checks, and the loose ends waiting at your desk.<br>
+    CodeShark runs on your Mac, learns how you work, and sends back the result.
+  </p>
   <p>
     <a href="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml"><img src="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
     <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&amp;logoColor=white" alt="Python 3.11+"></a>
@@ -18,16 +22,29 @@
   </p>
 </div>
 
-Codex-codeshark connects one authenticated administrator chat to a sandboxed Codex session on your Mac. It keeps work queued across restarts, runs scheduled checks, proposes durable memories and reusable skills, and can answer natural-language mentions in administrator-enabled Telegram groups.
+Codex-codeshark turns the OpenAI Codex CLI already on your Mac into an always-on personal agent you can reach from Telegram. Send a request in natural language and it can continue your working session, inspect or modify approved projects, run commands, accept files, schedule follow-up work, and remember durable preferences for next time.
 
-It uses your existing Codex login. The project does not require a separate model API key, does not copy ChatGPT credentials into the repository, and stores the Telegram bot token in macOS Keychain.
+The queue survives restarts. Risky actions stop for approval. You get the finished result instead of a stream of process chatter. Telegram is the private remote control; the actual work stays on your Mac.
+
+## What it does
+
+- **Takes on real project work** — inspects, edits, and runs commands inside a private workspace or server-approved project roots.
+- **Keeps the thread** — continues one Codex conversation across messages and process restarts, then rolls long sessions into durable summaries.
+- **Learns how you work** — captures useful preferences and procedures as searchable memories and reusable skills, with explicit review and deletion controls.
+- **Follows up on schedule** — runs one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions.
+- **Works from the files you send** — saves photos and documents to a private inbox and uses their captions as task instructions.
+- **Waits when the stakes are higher** — holds destructive or externally mutating requests until you explicitly approve them.
+- **Answers a group without exposing your agent** — enabled groups get mention-only, requester-isolated, read-only conversations with no access to your projects, tools, or private context.
+- **Operates like a service** — queues work durably, retries failed Telegram deliveries, rotates bounded data, and ships with install, status, logs, restart, migration, and diagnostic commands.
+
+For example, you can ask it to fix a failing test in an approved repo, investigate an attached error log, remember a project convention, or check a service every morning. It uses your existing Codex login, needs no separate model API key, keeps the Telegram bot token in macOS Keychain, and adds zero runtime dependencies.
 
 > [!IMPORTANT]
 > Codex-codeshark is intentionally a **single-administrator, Telegram-only, macOS gateway**. Group members are unprivileged guests, not additional administrators. It is not a hosted bot service or a multi-agent framework.
 
-## Why Codex-codeshark?
+## Personal by design
 
-Open-ended agent frameworks are powerful, but a personal coding gateway benefits from a smaller and more inspectable security boundary. Codex-codeshark focuses on one channel, one administrator, explicit guest-group access, and one local Codex runtime.
+This is a focused personal agent, not a general-purpose bot platform. One channel, one administrator, explicit guest-group access, and one local Codex runtime keep its behavior and security boundary understandable.
 
 | Principle | What it means here |
 |---|---|
@@ -38,29 +55,6 @@ Open-ended agent frameworks are powerful, but a personal coding gateway benefits
 | Durable, not unbounded | Queues, sessions, memories, skills, feedback, and failed deliveries have retention limits. |
 | Fail closed | Unlisted MCP servers or tools prevent startup instead of silently becoming available. |
 | Portable personal data | Memories, skills, feedback, and schedules can move without exporting secrets. |
-
-## What it does
-
-- **Persistent conversation** — continues one Codex thread across Telegram messages and process restarts.
-- **Administrator-enabled groups** — gives each requester a separate bounded conversation through `@bot natural-language request` without sharing administrator sessions, memory, custom skills, projects, attachments, network, MCP, or write access.
-- **Delegated project development** — lets the administrator inspect and modify server-configured project roots while keeping destructive and external actions behind approval.
-- **Durable task queue** — stores queued work in SQLite and executes exactly one task at a time.
-- **Scheduled work** — supports one-time reminders, heartbeat intervals, and five-field cron expressions.
-- **Ephemeral automation** — scheduled jobs use `codex exec --ephemeral` and do not create conversation history.
-- **Active automatic learning** — lets the model independently decide when administrator context contains a durable preference, pattern, fact, or reusable procedure, then creates or updates it automatically.
-- **Relevant skill loading** — injects at most three approved skills selected for the current request.
-- **Searchable recall** — searches approved memories and skills with source IDs and task provenance.
-- **Feedback-aware learning** — tracks usage and ratings, ranks equally relevant skills, and surfaces memories that need review.
-- **Bounded sessions** — learns a durable summary, deletes the full session, and starts fresh at the configured turn limit.
-- **Risk approval** — holds destructive or external-state requests until `/approve` is received.
-- **MCP policy** — disables every server and tool that is not explicitly allowed for this gateway.
-- **Quiet task delivery** — sends no queue/start chatter; Telegram receives only approval prompts, errors, and final results.
-- **Reliable replies** — handles Telegram rate limits and keeps a bounded failed-delivery queue for explicit retry.
-- **Safe attachments** — downloads Telegram photos and documents into a private, gitignored `workspace/inbox/` directory.
-- **First-class service CLI** — installs, starts, stops, restarts, inspects, and safely reads the macOS service.
-- **Portable migration** — exports personal data in a versioned, checksummed archive without tokens or local configuration.
-- **Automated releases** — validates versions and signed tags, runs tests, builds packages, and publishes GitHub releases.
-- **Zero runtime dependencies** — uses only the Python standard library at runtime.
 
 ## Quick start
 
@@ -175,7 +169,7 @@ Codex-codeshark connects an agent runtime to a real messaging surface. Treat eve
 - The Codex child process receives a strict environment allowlist; Telegram, OpenAI API,
   cloud, GitHub, and SSH-agent credentials from the parent are not forwarded.
 - Telegram cannot choose the workspace path or pass arbitrary Codex CLI flags.
-- Administrator tasks run with `sandbox_mode = "workspace-write"`, server-controlled `delegated_roots`, and `approval_policy = "never"`.
+- Unapproved administrator tasks are forced into `sandbox_mode = "read-only"` with network, MCP, apps, browser/computer control, and extra writable roots disabled. Requests that may mutate state wait for `/approve`; only the approved run receives the configured `workspace-write`, network, MCP, and `delegated_roots` capabilities.
 - Guest requests use a separate Codex home, an empty workspace outside the repository, an ephemeral session, and a least-privilege [Codex permission profile](https://learn.chatgpt.com/docs/permissions) that grants read access only to that empty workspace and minimal runtime files.
 - Guest web search, network, apps, browser/computer control, MCP servers, memories, multi-agent execution, and image generation are disabled. The isolated Codex state is cleaned after each request.
 - The gateway retains only bounded, requester-scoped group exchanges for conversational continuity. They are never used for administrator learning and are excluded from migration exports.
@@ -184,6 +178,7 @@ Codex-codeshark connects an agent runtime to a real messaging surface. Treat eve
 - Only one Codex task runs at a time, with cancellation and a configurable timeout.
 - Requests classified as destructive or externally mutating wait for explicit approval.
 - Interrupted approved tasks require approval again after restart.
+- The LaunchAgent runs a versioned private source snapshot under `~/Library/Application Support/Codex-codeshark/`, rather than importing executable code from a delegated project tree. Runtime directories and persisted data are owner-only.
 - Every configured MCP server must be represented in the gateway policy.
 - Servers without an explicit tool allowlist are disabled.
 
@@ -197,13 +192,13 @@ See [SECURITY.md](SECURITY.md) for vulnerability reporting and the supported-ver
 Administrator private chat                 Enabled Telegram group
         |                                           |
         v                                           v
-Paired user ID + risk approval gate         Group allowlist + explicit @mention
+Paired user ID + capability approval gate   Group allowlist + explicit @mention
         |                                           |
         v                                           v
 Session + active memory + learned skills    Requester context + isolated Codex home
         |                                           |
         v                                           v
-workspace + delegated project writes       Empty read-only workspace; no tools/network
+read-only or approved delegated writes     Empty read-only workspace; no tools/network
         |                                           |
         +----------------> final replies <----------+
 ```
@@ -245,9 +240,9 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 | `/review_memories` | List never-used, stale, or negatively rated memories for review. |
 | `/learn memory TEXT` | Immediately add or update a memory. |
 | `/learn skill NAME \| PROCEDURE` | Immediately add or update a reusable skill. |
-| `/learning` | Audit recent automatic learning events and any legacy pending proposals. |
-| `/approve ID` | Approve a risky task, risky scheduled job, or legacy learning proposal. |
-| `/reject ID` | Reject a pending risky item or legacy learning proposal. |
+| `/learning` | Audit recent automatic learning events and pending proposals. |
+| `/approve ID` | Approve a risky task, risky scheduled job, or pending learning proposal. |
+| `/reject ID` | Reject a pending risky item or learning proposal. |
 | `/skills` | List approved local skills. |
 | `/forget_skill ID` | Delete an approved skill. |
 | `/good [NOTE]` | Positively rate the last successful task. |
@@ -278,14 +273,17 @@ Telegram is the authenticated transport and control plane. Codex performs reason
 
 After every successful private administrator task, the model proactively evaluates the current conversation and accumulated session context. It independently decides whether the interaction reveals a high-value durable preference, working pattern, personal or project fact, or reusable procedure. No `/learn` command is required. One-off details, speculation, secrets, credentials, and unnecessary sensitive data are explicitly excluded.
 
-When learning is warranted, the model appends a hidden structured record. The gateway removes it from the Telegram response, applies it immediately, and records an audit event.
+When learning is warranted, the model appends a hidden structured record. The gateway removes it from the Telegram response and records an audit event. A candidate is applied automatically only when its content is an exact, non-secret quote from the current authenticated administrator request. Inferred, transformed, session-summary, or otherwise ungrounded candidates remain quarantined as `pending` until `/approve lN` or `/reject lN`.
+
+On upgrade, previously auto-applied private-task candidates linked to a task but lacking a provenance record are moved back to `pending`; their matching learned memory or skill is removed until you review it. This avoids treating old model output as trusted instructions.
 
 ```text
 Task succeeds
     -> model independently evaluates the context
     -> no durable pattern: no change
-       durable pattern: create or update memory/skill
-    -> gateway applies it and records the event
+       durable pattern: propose memory/skill with source evidence
+    -> exact current-request evidence: apply and record
+       otherwise: quarantine for administrator review
 ```
 
 `/learning` shows the recent audit history. `/memories`, `/skills`, `/forget`, and `/forget_skill` remain the administrator's inspection and deletion controls. A stable memory title or skill name updates the existing record in place instead of creating unbounded copies. Learned memories become durable context; learned skills are selected by keyword relevance and loaded only when needed. Usage and `/good` or `/bad` feedback break ties between equally relevant skills. Group requests and scheduled jobs never feed this learning loop.
@@ -294,7 +292,7 @@ Task succeeds
 
 Interactive Telegram requests continue the current persisted Codex session. The session ID and turn count are stored in `runtime/state.json`.
 
-When `max_session_turns` is reached, Codex automatically learns a durable summary. The gateway deletes the old Codex session only after that summary is successfully applied. If learning or deletion fails, the existing session is kept.
+When `max_session_turns` is reached, Codex proposes a durable summary and queues it for review. The gateway deletes the old Codex session only after the proposal is safely persisted. If queuing or deletion fails, the existing session is kept.
 
 Scheduled jobs are always ephemeral. They do not create or continue Codex sessions. A recurring job cannot enqueue another run while its previous run is active, preventing an unbounded backlog.
 
@@ -348,7 +346,7 @@ Codex-codeshark stores enough state to resume useful work without building an un
 | Group requester context | Six successful exchanges per `(group, requester)`, 30-day expiry, 1,000 rows globally; deleted when the group is disabled and excluded from migration. |
 | Enabled group allowlist | Stored locally in SQLite; maximum 20 groups; excluded from personal-data migration. |
 | Task records in `runtime/agent.db` | Raw prompts are cleared on terminal status; 200 terminal records are retained. |
-| Automatic learning audit | Up to 200 processed events plus at most 100 legacy pending proposals. |
+| Automatic learning audit | Up to 200 processed events plus at most 100 pending proposals. |
 | Long-term memory | 12,000 characters by default; 1,000 characters per item. |
 | Approved skills | Up to 100 skills; 8,000 characters per skill. |
 | Scheduled jobs | Up to 100 active jobs and 200 terminal records. |
@@ -443,7 +441,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [CHANGELO
 
 ## Upgrading
 
-Stop the service, update the source tree, rerun the offline checks, and restart:
+Stop the service, update the source tree, rerun the offline checks, and restart. Restarting deploys a fresh versioned service snapshot:
 
 ```bash
 PYTHONPATH=src python3 -m codex_codeshark stop

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .secure_io import atomic_write_text, ensure_private_directory
+
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_PROJECT_ROOT = (
@@ -322,15 +324,12 @@ def write_codex_profile(profile: str, *, codex_home: Path | None = None) -> Path
     path = codex_profile_path(profile, codex_home=codex_home)
     if path.exists():
         return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
+    ensure_private_directory(path.parent)
+    atomic_write_text(
+        path,
         'sandbox_mode = "workspace-write"\napproval_policy = "never"\n\n'
         '[sandbox_workspace_write]\nnetwork_access = false\n',
-        encoding="utf-8",
     )
-    temporary.chmod(0o600)
-    os.replace(temporary, path)
     return path
 
 
@@ -474,8 +473,5 @@ def write_local_config(
             "",
         ]
     )
-    temporary = config_path.with_suffix(config_path.suffix + ".tmp")
-    temporary.write_text(content, encoding="utf-8")
-    temporary.chmod(0o600)
-    os.replace(temporary, config_path)
+    atomic_write_text(config_path, content, private_parent=False)
     return config_path
