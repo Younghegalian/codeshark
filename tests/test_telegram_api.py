@@ -96,6 +96,21 @@ class TelegramAPITests(unittest.TestCase):
         self.assertTrue(caught.exception.ambiguous_delivery)
         self.assertEqual(urlopen_mock.call_count, 1)
 
+    def test_send_message_can_reply_to_a_message(self) -> None:
+        api = TelegramAPI("123456789:ABC_def-123")
+        api.call = Mock()
+
+        api.send_message(123, "final", reply_to_message_id=42)
+
+        method, payload = api.call.call_args.args[:2]
+        self.assertEqual(method, "sendMessage")
+        self.assertEqual(payload["chat_id"], 123)
+        self.assertEqual(payload["text"], "final")
+        self.assertEqual(
+            json.loads(payload["reply_parameters"]),
+            {"message_id": 42, "allow_sending_without_reply": True},
+        )
+
     @patch("codex_codeshark.telegram_api.urllib.request.urlopen")
     def test_downloads_file_atomically_with_private_permissions(
         self,

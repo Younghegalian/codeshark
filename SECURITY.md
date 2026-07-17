@@ -34,12 +34,12 @@ The intended boundaries are:
 - With the default `admin_full_access = false`, unapproved administrator tasks are forced into a read-only Codex sandbox with network, MCP, apps, browser/computer control, and additional writable roots disabled
 - With the default configuration, state-changing administrator requests wait for explicit approval before receiving the configured `workspace-write`, network, MCP, and `delegated_roots` capabilities
 - Optional `admin_full_access = true` for the paired administrator only: private tasks use Codex `danger-full-access`, including plugin installation, live network access, and configured MCP servers without a task-level approval pause
-- Optional administrator-configured read-only roots and writable delegated project roots for trusted private-chat work
+- Optional administrator-configured read-only roots and writable delegated project roots for trusted private-chat work, plus the gateway's own server-controlled repository
 - Group access denied by default and enabled only by the paired administrator
-- Group members limited to explicit bot mentions in an enabled group, with no attachments or control commands
+- Group members limited to direct bot requests (explicit mention or reply to a bot message) in an enabled group, with no attachments or control commands
 - Group continuity scoped to each `(group, requester)`, bounded to six exchanges with 30-day expiry, excluded from administrator learning and migration exports
-- A separate ephemeral group Codex runtime outside the repository, using a least-privilege filesystem permission profile that can read only its empty workspace and minimal runtime files
-- Group network, web search, apps, browser/computer control, MCP, memories, multi-agent execution, and write access disabled
+- Separate ephemeral group Codex runtimes outside the repository, each using a least-privilege filesystem permission profile that can read only its empty workspace and minimal runtime files
+- Group network and web search are enabled only for ordinary research; apps, browser/computer control, MCP, memories, multi-agent execution, and writes outside the group workspace remain disabled
 - A mandatory MCP server inventory and per-tool allowlist
 - Explicit approval for requests classified as destructive or externally mutating
 - Bot tokens stored in macOS Keychain and a strict Codex child-environment allowlist

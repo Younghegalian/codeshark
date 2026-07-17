@@ -100,6 +100,15 @@ class MemoryStoreTests(unittest.TestCase):
         self.assertIn("/srv/projects", prompt)
         self.assertIn("Do not create, edit, delete", prompt)
 
+    def test_compose_prompt_identifies_the_codeshark_source_repository(self) -> None:
+        prompt, _, _ = compose_prompt(
+            "Inspect the gateway",
+            [],
+            agent_repository_root=Path("/srv/codeshark"),
+        )
+        self.assertIn("Codeshark source repository", prompt)
+        self.assertIn("/srv/codeshark", prompt)
+
     def test_compose_prompt_lists_delegated_writable_roots(self) -> None:
         prompt, _, _ = compose_prompt(
             "Update the project",

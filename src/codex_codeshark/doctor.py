@@ -72,7 +72,7 @@ def run_doctor() -> int:
 
     def group_runtime_check() -> str:
         config = config_holder.get("value") or load_config()
-        return prepare_group_runtime(config)
+        return f"{prepare_group_runtime(config)} ({config.worker_count} workers)"
 
     check("isolated group runtime", group_runtime_check)
 

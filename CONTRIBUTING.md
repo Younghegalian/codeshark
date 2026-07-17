@@ -1,6 +1,6 @@
 # Contributing to Codex-codeshark
 
-Thank you for helping improve Codex-codeshark. The project intentionally stays small: one authenticated Telegram user, one local Codex runtime, one server-controlled workspace, and no runtime dependencies outside the Python standard library.
+Thank you for helping improve Codex-codeshark. The project intentionally stays small: one authenticated Telegram user, up to three local Codex execution slots, one server-controlled workspace, and no runtime dependencies outside the Python standard library.
 
 Participation is governed by the project's [Code of Conduct](CODE_OF_CONDUCT.md).
 

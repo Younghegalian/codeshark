@@ -258,6 +258,7 @@ def compose_prompt(
     task_id: str = "",
     read_only_roots: tuple[Path, ...] = (),
     delegated_roots: tuple[Path, ...] = (),
+    agent_repository_root: Path | None = None,
     agent_name: str = "Codeshark",
     owner_profile: str | None = None,
     owner_onboarding_requested: bool = False,
@@ -286,6 +287,13 @@ def compose_prompt(
             owner_onboarding_requested=owner_onboarding_requested,
         )
     ]
+    if agent_repository_root is not None:
+        context_blocks.append(
+            "[Codeshark source repository]\n"
+            f"The gateway's own server-controlled repository is {agent_repository_root}. "
+            "For questions or changes about Codeshark itself, inspect this repository and its "
+            "AGENTS.md before acting.\n[/Codeshark source repository]"
+        )
     if delegated_roots:
         roots = "\n".join(f"- {root}" for root in delegated_roots)
         context_blocks.append(

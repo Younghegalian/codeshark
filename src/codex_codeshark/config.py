@@ -50,6 +50,7 @@ class Config:
     poll_timeout_seconds: int = 30
     task_timeout_seconds: int = 1800
     queue_size: int = 3
+    worker_count: int = 3
     max_session_turns: int = 30
     memory_max_chars: int = 12000
     codex_network_access: bool = False
@@ -63,6 +64,7 @@ class Config:
     codex_home: Path = DEFAULT_CODEX_HOME
     group_workdir: Path = GROUP_RUNTIME_ROOT / "workspace"
     group_codex_home: Path = GROUP_RUNTIME_ROOT / "codex-home"
+    agent_repository_root: Path = PROJECT_ROOT
 
 
 def _require_int(data: dict[str, Any], key: str, default: int) -> int:
@@ -109,10 +111,17 @@ def load_config(path: Path | None = None) -> Config:
         r"[A-Za-z0-9._-]{1,100}", codex_model
     ):
         raise ConfigError("codex_model must be a valid model identifier")
+    agent_repository_root = PROJECT_ROOT.resolve()
+    if not agent_repository_root.is_dir():
+        raise ConfigError(
+            "Codeshark source repository must be an existing directory: "
+            f"{agent_repository_root}"
+        )
 
     poll_timeout = _require_int(data, "poll_timeout_seconds", 30)
     task_timeout = _require_int(data, "task_timeout_seconds", 1800)
     queue_size = _require_int(data, "queue_size", 3)
+    worker_count = _require_int(data, "worker_count", 3)
     max_session_turns = _require_int(data, "max_session_turns", 30)
     memory_max_chars = _require_int(data, "memory_max_chars", 12000)
     codex_network_access = _require_bool(data, "codex_network_access", False)
@@ -124,6 +133,8 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError("task_timeout_seconds must be between 30 and 86400")
     if not 1 <= queue_size <= 20:
         raise ConfigError("queue_size must be between 1 and 20")
+    if not 1 <= worker_count <= 3:
+        raise ConfigError("worker_count must be between 1 and 3")
     if not 5 <= max_session_turns <= 500:
         raise ConfigError("max_session_turns must be between 5 and 500")
     if not 1000 <= memory_max_chars <= 20000:
@@ -213,6 +224,7 @@ def load_config(path: Path | None = None) -> Config:
         poll_timeout_seconds=poll_timeout,
         task_timeout_seconds=task_timeout,
         queue_size=queue_size,
+        worker_count=worker_count,
         max_session_turns=max_session_turns,
         memory_max_chars=memory_max_chars,
         codex_network_access=codex_network_access,
@@ -222,6 +234,7 @@ def load_config(path: Path | None = None) -> Config:
         delegated_roots=tuple(delegated_roots),
         mcp_known_servers=tuple(raw_known_servers),
         mcp_allowed_tools=tuple(allowed_tools),
+        agent_repository_root=agent_repository_root,
     )
 
 
@@ -273,6 +286,34 @@ def configured_codex_runtime(
     return model, reasoning_effort
 
 
+def _prepare_group_runtime_slot(
+    workdir: Path,
+    isolated_home: Path,
+    auth_source: Path,
+) -> None:
+    workdir.mkdir(parents=True, exist_ok=True)
+    isolated_home.mkdir(parents=True, exist_ok=True)
+    workdir.chmod(0o700)
+    isolated_home.chmod(0o700)
+
+    auth_link = isolated_home / "auth.json"
+    if auth_link.exists() or auth_link.is_symlink():
+        if not auth_link.is_symlink() or auth_link.resolve() != auth_source:
+            raise ConfigError(
+                "group Codex home contains an unexpected auth.json; remove it and rerun doctor"
+            )
+    else:
+        auth_link.symlink_to(auth_source)
+
+
+def group_worker_runtime(config: Config, worker_index: int) -> tuple[Path, Path]:
+    if not 0 <= worker_index < config.worker_count:
+        raise ValueError("worker index is outside the configured worker count")
+    workdir = config.group_workdir.expanduser().resolve() / f"worker-{worker_index + 1}"
+    isolated_home = config.group_codex_home.expanduser().resolve() / f"worker-{worker_index + 1}"
+    return workdir, isolated_home
+
+
 def prepare_group_runtime(config: Config) -> str:
     workdir = config.group_workdir.expanduser().resolve()
     isolated_home = config.group_codex_home.expanduser().resolve()
@@ -283,22 +324,13 @@ def prepare_group_runtime(config: Config) -> str:
     ):
         raise ConfigError("group_workdir and group_codex_home must be separate directories")
 
-    workdir.mkdir(parents=True, exist_ok=True)
-    isolated_home.mkdir(parents=True, exist_ok=True)
-    workdir.chmod(0o700)
-    isolated_home.chmod(0o700)
-
     auth_source = (config.codex_home / "auth.json").expanduser().resolve()
     if not auth_source.is_file():
         raise ConfigError(f"Codex authentication file is missing: {auth_source}")
-    auth_link = isolated_home / "auth.json"
-    if auth_link.exists() or auth_link.is_symlink():
-        if not auth_link.is_symlink() or auth_link.resolve() != auth_source:
-            raise ConfigError(
-                "group Codex home contains an unexpected auth.json; remove it and rerun doctor"
-            )
-    else:
-        auth_link.symlink_to(auth_source)
+    _prepare_group_runtime_slot(workdir, isolated_home, auth_source)
+    for worker_index in range(config.worker_count):
+        slot_workdir, slot_home = group_worker_runtime(config, worker_index)
+        _prepare_group_runtime_slot(slot_workdir, slot_home, auth_source)
     return str(workdir)
 
 
@@ -462,6 +494,7 @@ def write_local_config(
             "poll_timeout_seconds = 30",
             "task_timeout_seconds = 1800",
             "queue_size = 3",
+            "worker_count = 3",
             "max_session_turns = 30",
             "memory_max_chars = 12000",
             "codex_network_access = false",

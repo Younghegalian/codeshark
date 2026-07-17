@@ -88,6 +88,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.allowed_user_ids, frozenset({123}))
             self.assertEqual(loaded.workdir, workspace.resolve())
             self.assertEqual(loaded.max_session_turns, 25)
+            self.assertEqual(loaded.worker_count, 3)
             self.assertEqual(loaded.codex_model, "gpt-5.5")
             self.assertFalse(loaded.codex_network_access)
             self.assertTrue(loaded.admin_full_access)
@@ -99,6 +100,28 @@ class ConfigTests(unittest.TestCase):
                 loaded.mcp_allowed_tools,
                 (("github", ("list_issues", "get_issue")),),
             )
+
+    def test_rejects_out_of_range_worker_count(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config = root / "config.toml"
+            config.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        "worker_count = 4",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "worker_count"):
+                load_config(config)
 
     def test_rejects_empty_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -288,6 +311,10 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(link.is_symlink())
             self.assertEqual(link.resolve(), auth.resolve())
             self.assertEqual(config.group_workdir.stat().st_mode & 0o777, 0o700)
+            for worker_index in range(config.worker_count):
+                self.assertTrue(
+                    (config.group_codex_home / f"worker-{worker_index + 1}" / "auth.json").is_symlink()
+                )
 
     def test_writes_and_validates_restricted_codex_profile(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

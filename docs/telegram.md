@@ -30,7 +30,7 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 
 ## Private-chat commands
 
-Plain text queues a task in the current interactive Codex session. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction.
+Plain text queues a task in the current interactive Codex session. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction. Up to three independent tasks may run in parallel, while tasks in the same persistent chat remain ordered to protect that chat's session.
 
 On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information. To introduce the owner in groups, set a separate explicit public card; private owner context is never shared there.
 
@@ -93,7 +93,7 @@ To receive a generated or existing result file, ask naturally (for example, `작
 
 Group access is disabled by default. Only the paired administrator can enable it. In an enabled group, the administrator retains the same capabilities and approval flow as in a private chat, while each private or group chat keeps an independent persistent Codex session. Other group members receive an isolated ephemeral agent with no access to administrator sessions, memories, skills, projects, attachments, credentials, or configured roots. They may perform ordinary network research and can inspect, create, or modify files only in the separate group sandbox; that sandbox is cleared after every request. MCP tools, dependency or plugin installation, destructive changes, policy/root changes, and external state-changing work remain unavailable to non-administrators.
 
-For natural-language mentions, disable Privacy Mode for the bot with BotFather's `/setprivacy` command. Telegram does not deliver ordinary mention messages to privacy-enabled bots. Codeshark accepts only direct group requests: an explicit bot mention or a reply to one of its own messages. Replies are usable whenever Telegram delivers them to the bot.
+For natural-language mentions, disable Privacy Mode for the bot with BotFather's `/setprivacy` command. Telegram does not deliver ordinary mention messages to privacy-enabled bots. Codeshark accepts only direct group requests: an explicit bot mention or a reply to one of its own messages. Its final response is threaded as a reply to the request message.
 
 Add the bot to a group, then send:
 

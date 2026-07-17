@@ -20,17 +20,21 @@ from codex_codeshark.telegram_api import TelegramError
 class FakeTelegramAPI:
     def __init__(self) -> None:
         self.messages = []
+        self.message_replies = []
         self.documents = []
+        self.document_replies = []
 
-    def send_message(self, chat_id, text) -> None:
+    def send_message(self, chat_id, text, *, reply_to_message_id=None) -> None:
         self.messages.append((chat_id, text))
+        self.message_replies.append(reply_to_message_id)
 
     def download_file(self, file_id, destination, *, max_bytes) -> int:
         destination.write_bytes(b"attachment")
         return 10
 
-    def send_document(self, chat_id, document, *, max_bytes) -> None:
+    def send_document(self, chat_id, document, *, max_bytes, reply_to_message_id=None) -> None:
         self.documents.append((chat_id, document, max_bytes))
+        self.document_replies.append(reply_to_message_id)
 
 
 class FakeCodexRunner:
@@ -108,6 +112,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         chat_type: str = "private",
         *,
         chat_id: int | None = None,
+        message_id: int | None = 10,
         title: str | None = None,
         reply_to_bot: bool = False,
     ) -> dict:
@@ -119,6 +124,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             "chat": chat,
             "text": text,
         }
+        if message_id is not None:
+            message["message_id"] = message_id
         if reply_to_bot:
             message["reply_to_message"] = {
                 "from": {"username": "codex_codeshark_bot", "is_bot": True}
@@ -258,6 +265,53 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(task.ephemeral)
         self.assertTrue(task.restricted)
         self.assertEqual(task.prompt, "Explain Python")
+
+    def test_group_reply_uses_bot_id_when_telegram_omits_its_username(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app._bot_username = None
+        self.app._bot_user_id = 9988
+        update = self.update(456, "Explain Python", "supergroup", chat_id=group_id)
+        update["message"]["reply_to_message"] = {"from": {"id": 9988, "is_bot": True}}
+
+        self.app._handle_update(update)
+
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.assertEqual(task.prompt, "Explain Python")
+
+    def test_task_result_replies_to_original_telegram_message(self) -> None:
+        self.app.runner = FakeCodexRunner()
+
+        self.app._handle_update(self.update(123, "do work", message_id=42))
+        task = self.app.store.claim_next_task()
+        self.assertEqual(task.reply_to_message_id, 42)
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.messages, [(123, "done")])
+        self.assertEqual(self.api.message_replies, [42])
+
+    def test_group_reply_result_replies_to_original_group_message(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.runner = FakeCodexRunner()
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "Explain Python",
+                "supergroup",
+                chat_id=group_id,
+                message_id=77,
+                reply_to_bot=True,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.assertEqual(task.reply_to_message_id, 77)
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.messages, [(group_id, "done")])
+        self.assertEqual(self.api.message_replies, [77])
 
     def test_administrator_group_request_keeps_its_own_session_and_approval_flow(self) -> None:
         group_id = -100123
@@ -559,6 +613,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 self.app._handle_update(self.update(123, "do work"))
                 task = self.app.store.claim_next_task()
                 self.app._execute_task(task)
+                self.app.store.finish_task(task.id, "failed")
 
                 self.app._handle_update(self.update(123, "/bad failed"))
                 self.assertIn("no completed task", self.api.messages[-1][1].lower())
@@ -651,6 +706,27 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
         self.assertIn("Run tests with unittest", runner.prompts[0][0])
+
+    def test_administrator_prompt_identifies_the_codeshark_source_repository(self) -> None:
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(self.update(123, "Inspect Codeshark itself"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn(
+            str(self.config.agent_repository_root),
+            runner.prompts[0][0],
+        )
+        self.assertIn("Codeshark source repository", runner.prompts[0][0])
+
+    def test_creates_three_isolated_group_worker_runners_by_default(self) -> None:
+        self.assertEqual(len(self.app._worker_runners), 3)
+        workdirs = {runner.restricted_workdir for runner in self.app._worker_runners}
+        homes = {runner.restricted_codex_home for runner in self.app._worker_runners}
+        self.assertEqual(len(workdirs), 3)
+        self.assertEqual(len(homes), 3)
 
     def test_model_learning_marker_is_hidden_and_applied_automatically(self) -> None:
         result = RunResult(
@@ -846,7 +922,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_failed_reply_is_persisted_for_explicit_retry(self) -> None:
         class FailingAPI(FakeTelegramAPI):
-            def send_message(self, chat_id, text) -> None:
+            def send_message(self, chat_id, text, *, reply_to_message_id=None) -> None:
                 raise TelegramError("offline", ambiguous_delivery=True)
 
         self.app.api = FailingAPI()

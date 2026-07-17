@@ -11,7 +11,12 @@ from pathlib import Path
 
 from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
 from .codex_runner import CodexRunner, RunResult
-from .config import Config, configured_codex_runtime, prepare_group_runtime
+from .config import (
+    Config,
+    configured_codex_runtime,
+    group_worker_runtime,
+    prepare_group_runtime,
+)
 from .identity import (
     AGENT_NAME_TITLE,
     DEFAULT_AGENT_NAME,
@@ -113,6 +118,12 @@ class CompletedTask:
     response: str
 
 
+@dataclass(frozen=True)
+class ActiveTask:
+    task: TaskRecord
+    runner: CodexRunner
+
+
 def split_message(text: str, limit: int = 3900) -> list[str]:
     if len(text) <= limit:
         return [text]
@@ -179,25 +190,55 @@ class AgentApp:
             config.codex_profile,
             codex_home=config.codex_home,
         )
-        self.runner = CodexRunner(
-            binary=config.codex_binary,
-            profile=config.codex_profile,
-            workdir=config.workdir,
-            restricted_workdir=config.group_workdir,
-            restricted_codex_home=config.group_codex_home,
-            timeout_seconds=config.task_timeout_seconds,
-            model=config.codex_model,
-            model_reasoning_effort=reasoning_effort,
-            additional_write_roots=config.delegated_roots,
-            mcp_known_servers=config.mcp_known_servers,
-            mcp_allowed_tools=config.mcp_allowed_tools,
-            network_access=config.codex_network_access,
+        self._administrator_write_roots = self._roots_with_agent_repository(
+            config.delegated_roots
         )
+        self._worker_runners = tuple(
+            self._build_runner(worker_index, reasoning_effort)
+            for worker_index in range(config.worker_count)
+        )
+        self.runner = self._worker_runners[0]
         self._status_lock = threading.Lock()
-        self._active_task: TaskRecord | None = None
+        self._active_tasks: dict[str, ActiveTask] = {}
         self._last_completed_task: CompletedTask | None = None
         self._wake_worker = threading.Event()
         self._bot_username: str | None = None
+        self._bot_user_id: int | None = None
+
+    def _roots_with_agent_repository(self, roots: tuple[Path, ...]) -> tuple[Path, ...]:
+        result: list[Path] = []
+        for root in roots:
+            resolved = root.resolve()
+            if resolved not in result:
+                result.append(resolved)
+        agent_repository = self.config.agent_repository_root.resolve()
+        if not any(
+            agent_repository == root or agent_repository.is_relative_to(root)
+            for root in result
+        ):
+            result.append(agent_repository)
+        return tuple(result)
+
+    def _build_runner(
+        self,
+        worker_index: int,
+        reasoning_effort: str | None,
+    ) -> CodexRunner:
+        group_workdir, group_codex_home = group_worker_runtime(self.config, worker_index)
+        return CodexRunner(
+            binary=self.config.codex_binary,
+            profile=self.config.codex_profile,
+            workdir=self.config.workdir,
+            restricted_workdir=group_workdir,
+            restricted_codex_home=group_codex_home,
+            timeout_seconds=self.config.task_timeout_seconds,
+            model=self.config.codex_model,
+            model_reasoning_effort=reasoning_effort,
+            additional_write_roots=self._administrator_write_roots,
+            mcp_known_servers=self.config.mcp_known_servers,
+            mcp_allowed_tools=self.config.mcp_allowed_tools,
+            network_access=self.config.codex_network_access,
+        )
 
     def _quarantine_legacy_automatic_learning(self) -> None:
         for candidate in self.learning.list_legacy_automatic_approved():
@@ -216,10 +257,18 @@ class AgentApp:
         identity = self.api.get_me()
         username = identity.get("username")
         self._bot_username = username.lower() if isinstance(username, str) else None
+        bot_user_id = identity.get("id")
+        self._bot_user_id = bot_user_id if isinstance(bot_user_id, int) else None
         self.api.delete_webhook(drop_pending_updates=False)
         self.api.set_commands()
         LOGGER.info("starting @%s", identity.get("username", "unknown"))
-        threading.Thread(target=self._worker, name="codex-worker", daemon=True).start()
+        for worker_index, runner in enumerate(self._worker_runners, start=1):
+            threading.Thread(
+                target=self._worker,
+                args=(runner,),
+                name=f"codex-worker-{worker_index}",
+                daemon=True,
+            ).start()
 
         while True:
             snapshot = self.state.snapshot()
@@ -247,6 +296,8 @@ class AgentApp:
         chat_id = chat.get("id")
         if not isinstance(user_id, int) or not isinstance(chat_id, int):
             return
+        message_id = message.get("message_id")
+        reply_to_message_id = message_id if isinstance(message_id, int) else None
         chat_type = chat.get("type")
         if chat_type in {"group", "supergroup"}:
             self._handle_group_message(message, chat, user_id, chat_id)
@@ -259,7 +310,11 @@ class AgentApp:
 
         text = message.get("text")
         if not isinstance(text, str) or not text.strip():
-            if self._enqueue_attachment(chat_id, message):
+            if self._enqueue_attachment(
+                chat_id,
+                message,
+                reply_to_message_id=reply_to_message_id,
+            ):
                 return
             self._send_message(chat_id, "Send text, a photo, or a document.")
             return
@@ -272,7 +327,7 @@ class AgentApp:
             return
 
         self._request_owner_onboarding(chat_id)
-        self._enqueue_user_task(chat_id, text)
+        self._enqueue_user_task(chat_id, text, reply_to_message_id=reply_to_message_id)
 
     def _handle_admin_command(self, chat_id: int, command: str, argument: str) -> bool:
         if command in {"/start", "/help"}:
@@ -410,12 +465,15 @@ class AgentApp:
             self._send_message(chat_id, f"Group access is {state}.")
             return
 
+        message_id = message.get("message_id")
+        reply_to_message_id = message_id if isinstance(message_id, int) else None
         enabled = self.store.is_group_enabled(chat_id)
         if not enabled:
             if is_admin and self._extract_group_request(message) is not None:
                 self._send_message(
                     chat_id,
                     "Group access is disabled. The paired administrator must run /enable_group.",
+                    reply_to_message_id=reply_to_message_id,
                 )
             return
 
@@ -429,45 +487,80 @@ class AgentApp:
         if request is None:
             return
         if not request:
-            self._send_message(chat_id, "Mention this bot and include a request.")
+            self._send_message(
+                chat_id,
+                "Mention this bot and include a request.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return
         if is_admin:
-            self._enqueue_user_task(chat_id, request)
+            self._enqueue_user_task(
+                chat_id,
+                request,
+                reply_to_message_id=reply_to_message_id,
+            )
             return
-        self._enqueue_group_task(chat_id, user_id, request)
+        self._enqueue_group_task(
+            chat_id,
+            user_id,
+            request,
+            reply_to_message_id=reply_to_message_id,
+        )
 
     def _extract_group_request(self, message: dict) -> str | None:
         text = message.get("text")
         if not isinstance(text, str):
             return None
-        if self._bot_username is None:
-            return None
-        pattern = re.compile(
-            rf"(?<![A-Za-z0-9_])@{re.escape(self._bot_username)}(?![A-Za-z0-9_])",
-            flags=re.IGNORECASE,
-        )
-        match = pattern.search(text)
-        if match is not None:
-            return (text[: match.start()] + text[match.end() :]).strip()
+        if self._bot_username is not None:
+            pattern = re.compile(
+                rf"(?<![A-Za-z0-9_])@{re.escape(self._bot_username)}(?![A-Za-z0-9_])",
+                flags=re.IGNORECASE,
+            )
+            match = pattern.search(text)
+            if match is not None:
+                return (text[: match.start()] + text[match.end() :]).strip()
         reply = message.get("reply_to_message")
         sender = reply.get("from") if isinstance(reply, dict) else None
+        sender_id = sender.get("id") if isinstance(sender, dict) else None
         username = sender.get("username") if isinstance(sender, dict) else None
-        if isinstance(username, str) and username.casefold() == self._bot_username.casefold():
+        if self._bot_user_id is not None and sender_id == self._bot_user_id:
+            return text.strip()
+        if (
+            self._bot_username is not None
+            and isinstance(username, str)
+            and username.casefold() == self._bot_username.casefold()
+        ):
             return text.strip()
         return None
 
-    def _enqueue_group_task(self, chat_id: int, user_id: int, prompt: str) -> None:
+    def _enqueue_group_task(
+        self,
+        chat_id: int,
+        user_id: int,
+        prompt: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> None:
         if self.risk_policy.requires_group_admin_privileges(prompt):
             self._send_message(
                 chat_id,
                 "That request requires administrator privileges. Ask the administrator privately.",
+                reply_to_message_id=reply_to_message_id,
             )
             return
-        if self.store.restricted_pending_count() >= 1:
-            self._send_message(chat_id, "A group request is already running. Try again later.")
+        if self.store.restricted_pending_count() >= self.config.worker_count:
+            self._send_message(
+                chat_id,
+                f"All {self.config.worker_count} group execution slots are busy. Try again later.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return
         if self.store.pending_count() >= self.config.queue_size:
-            self._send_message(chat_id, "The task queue is full. Try again later.")
+            self._send_message(
+                chat_id,
+                "The task queue is full. Try again later.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return
         self.store.enqueue_task(
             chat_id,
@@ -476,6 +569,7 @@ class AgentApp:
             ephemeral=True,
             restricted=True,
             requester_id=user_id,
+            reply_to_message_id=reply_to_message_id,
         )
         self._wake_worker.set()
 
@@ -485,7 +579,13 @@ class AgentApp:
         cleaned = re.sub(r"[^\w.-]+", "-", basename, flags=re.UNICODE).strip(".-")
         return (cleaned or fallback)[:120]
 
-    def _enqueue_attachment(self, chat_id: int, message: dict) -> bool:
+    def _enqueue_attachment(
+        self,
+        chat_id: int,
+        message: dict,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> bool:
         attachment = message.get("document")
         fallback = "document.bin"
         if not isinstance(attachment, dict):
@@ -496,13 +596,18 @@ class AgentApp:
             fallback = "photo.jpg"
         file_id = attachment.get("file_id")
         if not isinstance(file_id, str) or not file_id:
-            self._send_message(chat_id, "Telegram did not provide a usable attachment ID.")
+            self._send_message(
+                chat_id,
+                "Telegram did not provide a usable attachment ID.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return True
         reported_size = attachment.get("file_size")
         if isinstance(reported_size, int) and reported_size > self.config.attachment_max_bytes:
             self._send_message(
                 chat_id,
                 f"The attachment exceeds the {self.config.attachment_max_bytes}-byte limit.",
+                reply_to_message_id=reply_to_message_id,
             )
             return True
 
@@ -523,7 +628,11 @@ class AgentApp:
             )
         except TelegramError as exc:
             LOGGER.warning("attachment download failed: %s", exc)
-            self._send_message(chat_id, "The attachment could not be downloaded safely.")
+            self._send_message(
+                chat_id,
+                "The attachment could not be downloaded safely.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return True
 
         self._prune_attachment_inbox(inbox)
@@ -535,7 +644,11 @@ class AgentApp:
             prompt = f"{request}\n\n[Attached workspace file: {relative_path}]"
         else:
             prompt = f"Inspect the attached workspace file and report your findings: {relative_path}"
-        if not self._enqueue_user_task(chat_id, prompt):
+        if not self._enqueue_user_task(
+            chat_id,
+            prompt,
+            reply_to_message_id=reply_to_message_id,
+        ):
             destination.unlink(missing_ok=True)
         return True
 
@@ -550,7 +663,7 @@ class AgentApp:
         for path in managed[limit:]:
             path.unlink(missing_ok=True)
 
-    def _worker(self) -> None:
+    def _worker(self, runner: CodexRunner) -> None:
         while True:
             try:
                 self.store.enqueue_due_schedules()
@@ -565,9 +678,9 @@ class AgentApp:
                 self._wake_worker.clear()
                 continue
             with self._status_lock:
-                self._active_task = task
+                self._active_tasks[task.id] = ActiveTask(task, runner)
             try:
-                result = self._execute_task(task)
+                result = self._execute_task(task, runner)
                 if result.cancelled:
                     status = "cancelled"
                 elif result.exit_code != 0 or result.timed_out:
@@ -586,14 +699,19 @@ class AgentApp:
                 )
             finally:
                 with self._status_lock:
-                    self._active_task = None
+                    self._active_tasks.pop(task.id, None)
 
-    def _execute_task(self, task: TaskRecord) -> RunResult:
+    def _execute_task(
+        self,
+        task: TaskRecord,
+        runner: CodexRunner | None = None,
+    ) -> RunResult:
+        runner = runner or self.runner
         full_access = self.config.admin_full_access and not task.restricted
         effective_approval = task.approved or full_access
         file_delivery_requested = not task.restricted and self._file_delivery_requested(task.prompt)
         if not task.ephemeral and not task.restricted:
-            self._rotate_session_if_needed(task.chat_id)
+            self._rotate_session_if_needed(task.chat_id, runner)
         if task.restricted:
             context = (
                 self.store.group_context(task.chat_id, task.requester_id)
@@ -621,11 +739,12 @@ class AgentApp:
                 external_action_approved=effective_approval,
                 task_id=task.id,
                 read_only_roots=(
-                    self.config.read_only_roots
+                    (*self.config.read_only_roots, self.config.agent_repository_root)
                     if effective_approval
-                    else (*self.config.read_only_roots, *self.config.delegated_roots)
+                    else (*self.config.read_only_roots, *self._administrator_write_roots)
                 ),
-                delegated_roots=self.config.delegated_roots if effective_approval else (),
+                delegated_roots=self._administrator_write_roots if effective_approval else (),
+                agent_repository_root=self.config.agent_repository_root,
                 agent_name=self._agent_name(),
                 owner_profile=self._owner_profile(),
                 owner_onboarding_requested=self.state.owner_onboarding_requested(),
@@ -635,7 +754,7 @@ class AgentApp:
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
         thread_id = None if task.ephemeral else self.state.session_snapshot(task.chat_id).codex_thread_id
-        result = self.runner.run(
+        result = runner.run(
             prompt,
             thread_id,
             ephemeral=task.ephemeral,
@@ -686,6 +805,7 @@ class AgentApp:
             result,
             persist_session=not task.ephemeral,
             restricted=task.restricted,
+            reply_to_message_id=task.reply_to_message_id,
             documents=delivery_files,
         )
         if not task.restricted:
@@ -704,7 +824,7 @@ class AgentApp:
                 )
         return result
 
-    def _rotate_session_if_needed(self, chat_id: int) -> None:
+    def _rotate_session_if_needed(self, chat_id: int, runner: CodexRunner) -> None:
         snapshot = self.state.session_snapshot(chat_id)
         if not snapshot.codex_thread_id or snapshot.session_turn_count < self.config.max_session_turns:
             return None
@@ -713,7 +833,7 @@ class AgentApp:
             "or reusable procedures needed in future sessions as one learning proposal. "
             "Respond only with the learning_candidate protocol and omit one-off details."
         )
-        result = self.runner.run(summary_prompt, snapshot.codex_thread_id)
+        result = runner.run(summary_prompt, snapshot.codex_thread_id)
         if result.exit_code != 0 or result.cancelled or result.timed_out:
             LOGGER.warning("session rotation summary failed; keeping current session")
             return None
@@ -740,7 +860,7 @@ class AgentApp:
             LOGGER.exception("session rotation learning could not be queued; keeping current session")
             return None
         try:
-            self.runner.delete_session(snapshot.codex_thread_id)
+            runner.delete_session(snapshot.codex_thread_id)
         except Exception:
             LOGGER.exception("failed to delete session during automatic rotation")
             return None
@@ -817,36 +937,68 @@ class AgentApp:
         *,
         persist_session: bool,
         restricted: bool,
+        reply_to_message_id: int | None = None,
         documents: tuple[Path, ...] = (),
     ) -> None:
         if persist_session and result.thread_id:
             self.state.record_session_turn(chat_id, result.thread_id)
         if result.cancelled:
-            self._send_message(chat_id, "The task was cancelled.")
+            self._send_message(
+                chat_id,
+                "The task was cancelled.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return
         if result.timed_out:
-            self._send_message(chat_id, "The task exceeded its time limit and was stopped.")
+            self._send_message(
+                chat_id,
+                "The task exceeded its time limit and was stopped.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return
         if result.exit_code != 0:
             if restricted:
                 self._send_message(
                     chat_id,
                     "The restricted Codex task failed. Ask the administrator to check local logs.",
+                    reply_to_message_id=reply_to_message_id,
                 )
                 return
             details = result.stderr[-1500:] if result.stderr else "No error details were returned."
-            self._send_message(chat_id, f"Codex failed (exit {result.exit_code})\n\n{details}")
+            self._send_message(
+                chat_id,
+                f"Codex failed (exit {result.exit_code})\n\n{details}",
+                reply_to_message_id=reply_to_message_id,
+            )
             return
         if result.message:
-            self._send_chunks(chat_id, result.message)
+            self._send_chunks(chat_id, result.message, reply_to_message_id=reply_to_message_id)
         elif not documents:
-            self._send_message(chat_id, "Codex completed the task without a text response.")
+            self._send_message(
+                chat_id,
+                "Codex completed the task without a text response.",
+                reply_to_message_id=reply_to_message_id,
+            )
         for document in documents:
-            self._send_document(chat_id, document)
+            self._send_document(
+                chat_id,
+                document,
+                reply_to_message_id=reply_to_message_id,
+            )
 
-    def _enqueue_user_task(self, chat_id: int, prompt: str) -> bool:
+    def _enqueue_user_task(
+        self,
+        chat_id: int,
+        prompt: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> bool:
         if self.store.pending_count() >= self.config.queue_size:
-            self._send_message(chat_id, "The queue is full. Try again later.")
+            self._send_message(
+                chat_id,
+                "The queue is full. Try again later.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return False
         requires_approval = self._requires_admin_approval(prompt)
         task = self.store.enqueue_task(
@@ -855,12 +1007,14 @@ class AgentApp:
             source="telegram",
             ephemeral=False,
             requires_approval=requires_approval,
+            reply_to_message_id=reply_to_message_id,
         )
         if requires_approval:
             self._send_message(
                 chat_id,
                 f"This request may change external state or perform a risky action. "
                 f"Run /approve {task.id} to continue or /reject {task.id} to discard it.",
+                reply_to_message_id=reply_to_message_id,
             )
         else:
             self._wake_worker.set()
@@ -939,7 +1093,7 @@ class AgentApp:
         for root in (
             self.config.workdir,
             *self.config.read_only_roots,
-            *self.config.delegated_roots,
+            *self._administrator_write_roots,
         ):
             resolved = root.resolve()
             if resolved not in roots:
@@ -1024,7 +1178,10 @@ class AgentApp:
 
     def _start_new_session(self, chat_id: int) -> None:
         with self._status_lock:
-            active = self._active_task is not None
+            active = any(
+                item.task.chat_id == chat_id and not item.task.restricted
+                for item in self._active_tasks.values()
+            )
         if active:
             self._send_message(chat_id, "A task is running. Use /cancel before resetting the session.")
             return
@@ -1221,10 +1378,15 @@ class AgentApp:
             self._send_message(chat_id, "No scheduled job was found for that ID.")
 
     def _cancel(self, chat_id: int) -> None:
-        if self.runner.cancel():
+        with self._status_lock:
+            active = next(
+                (item for item in self._active_tasks.values() if item.task.chat_id == chat_id),
+                None,
+            )
+        if active is not None and active.runner.cancel():
             self._send_message(chat_id, "Sent a cancellation signal to the active Codex task.")
             return
-        task_id = self.store.cancel_oldest_queued()
+        task_id = self.store.cancel_oldest_queued(chat_id=chat_id)
         if task_id:
             self._send_message(chat_id, f"Cancelled queued task {task_id}.")
         else:
@@ -1232,7 +1394,10 @@ class AgentApp:
 
     def _record_feedback(self, chat_id: int, rating: str, note: str) -> None:
         with self._status_lock:
-            if self._active_task is not None:
+            if any(
+                item.task.chat_id == chat_id and not item.task.restricted
+                for item in self._active_tasks.values()
+            ):
                 message = "Wait for the active task to finish before rating it."
             elif self._last_completed_task is None:
                 message = "There is no completed task available to rate."
@@ -1276,13 +1441,13 @@ class AgentApp:
 
     def _status_text(self, chat_id: int) -> str:
         with self._status_lock:
-            active = self._active_task is not None
+            active = len(self._active_tasks)
         snapshot = self.state.session_snapshot(chat_id)
         session_id = snapshot.codex_thread_id
         session = session_id[:12] + "…" if session_id else "none"
         return "\n".join(
             [
-                f"Active task: {'yes' if active else 'no'}",
+                f"Active tasks: {active}/{self.config.worker_count}",
                 f"Persistent queue: {self.store.pending_count()}",
                 f"Codex model: {self.runner.model or 'Codex default'}",
                 f"Codex session: {session}",
@@ -1299,6 +1464,7 @@ class AgentApp:
                 + ("full" if self.config.admin_full_access else "approval-gated"),
                 f"Read-only project roots: {len(self.config.read_only_roots)}",
                 f"Delegated project roots: {len(self.config.delegated_roots)}",
+                f"Codeshark source repository: {self.config.agent_repository_root}",
                 f"Workspace: {self.config.workdir}",
             ]
         )
@@ -1488,13 +1654,25 @@ class AgentApp:
             lines.append(f"- {server}: {detail}")
         return "\n".join(lines)
 
-    def _send_chunks(self, chat_id: int, text: str) -> None:
+    def _send_chunks(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> None:
         for chunk in split_message(text):
-            self._send_message(chat_id, chunk)
+            self._send_message(chat_id, chunk, reply_to_message_id=reply_to_message_id)
 
-    def _send_message(self, chat_id: int, text: str) -> bool:
+    def _send_message(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> bool:
         try:
-            self.api.send_message(chat_id, text)
+            self.api.send_message(chat_id, text, reply_to_message_id=reply_to_message_id)
         except TelegramError as exc:
             delivery = self.store.record_delivery_failure(chat_id, text, str(exc))
             LOGGER.warning(
@@ -1506,11 +1684,26 @@ class AgentApp:
             return False
         return True
 
-    def _send_document(self, chat_id: int, document: Path) -> bool:
+    def _send_document(
+        self,
+        chat_id: int,
+        document: Path,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> bool:
         try:
-            self.api.send_document(chat_id, document, max_bytes=self.config.attachment_max_bytes)
+            self.api.send_document(
+                chat_id,
+                document,
+                max_bytes=self.config.attachment_max_bytes,
+                reply_to_message_id=reply_to_message_id,
+            )
         except TelegramError as exc:
             LOGGER.warning("Telegram document delivery failed for %s: %s", document.name, exc)
-            self._send_message(chat_id, "The requested file could not be delivered.")
+            self._send_message(
+                chat_id,
+                "The requested file could not be delivered.",
+                reply_to_message_id=reply_to_message_id,
+            )
             return False
         return True

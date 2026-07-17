@@ -149,18 +149,39 @@ class TelegramAPI:
         result = self.call("getUpdates", payload, timeout=timeout + 10)
         return result if isinstance(result, list) else []
 
-    def send_message(self, chat_id: int, text: str) -> None:
+    def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": "true",
+        }
+        if reply_to_message_id is not None:
+            payload["reply_parameters"] = json.dumps(
+                {
+                    "message_id": reply_to_message_id,
+                    "allow_sending_without_reply": True,
+                }
+            )
         self.call(
             "sendMessage",
-            {
-                "chat_id": chat_id,
-                "text": text,
-                "disable_web_page_preview": "true",
-            },
+            payload,
             retry_network=False,
         )
 
-    def send_document(self, chat_id: int, document: Path, *, max_bytes: int) -> None:
+    def send_document(
+        self,
+        chat_id: int,
+        document: Path,
+        *,
+        max_bytes: int,
+        reply_to_message_id: int | None = None,
+    ) -> None:
         try:
             size = document.stat().st_size
             if size > max_bytes:
@@ -179,12 +200,27 @@ class TelegramAPI:
         )[:120] or "document.bin"
         boundary = f"----codeshark-{uuid.uuid4().hex}"
         delimiter = boundary.encode("ascii")
-        body = b"".join(
-            (
+        parts = [
+            b"--" + delimiter + b"\r\n"
+            + b'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
+            + str(chat_id).encode("ascii")
+            + b"\r\n"
+        ]
+        if reply_to_message_id is not None:
+            reply_parameters = json.dumps(
+                {
+                    "message_id": reply_to_message_id,
+                    "allow_sending_without_reply": True,
+                }
+            ).encode("utf-8")
+            parts.append(
                 b"--" + delimiter + b"\r\n"
-                + b'Content-Disposition: form-data; name="chat_id"\r\n\r\n'
-                + str(chat_id).encode("ascii")
-                + b"\r\n",
+                + b'Content-Disposition: form-data; name="reply_parameters"\r\n\r\n'
+                + reply_parameters
+                + b"\r\n"
+            )
+        parts.extend(
+            (
                 b"--" + delimiter + b"\r\n"
                 + (
                     'Content-Disposition: form-data; name="document"; filename="'
@@ -196,6 +232,7 @@ class TelegramAPI:
                 b"--" + delimiter + b"--\r\n",
             )
         )
+        body = b"".join(parts)
         request = urllib.request.Request(
             f"{self._base_url}/sendDocument",
             data=body,

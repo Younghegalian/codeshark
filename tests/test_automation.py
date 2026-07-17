@@ -66,6 +66,64 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(completed.prompt, "")
             self.assertEqual(completed.status, "completed")
 
+    def test_claims_independent_tasks_in_parallel_without_racing_a_chat_session(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            first = store.enqueue_task(123, "first", source="telegram", ephemeral=False)
+            same_chat = store.enqueue_task(123, "second", source="telegram", ephemeral=False)
+            other_chat = store.enqueue_task(456, "third", source="telegram", ephemeral=False)
+
+            claimed_first = store.claim_next_task(now=other_chat.created_at + 1)
+            claimed_other = store.claim_next_task(now=other_chat.created_at + 1)
+            self.assertEqual(claimed_first.id, first.id)
+            self.assertEqual(claimed_other.id, other_chat.id)
+            self.assertIsNone(store.claim_next_task(now=other_chat.created_at + 1))
+
+            store.finish_task(claimed_first.id, "completed")
+            self.assertEqual(
+                store.claim_next_task(now=other_chat.created_at + 2).id,
+                same_chat.id,
+            )
+
+    def test_claims_restricted_group_requests_for_different_members_in_parallel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            first = store.enqueue_task(
+                -100123,
+                "first",
+                source="telegram-group",
+                ephemeral=True,
+                restricted=True,
+                requester_id=456,
+            )
+            second = store.enqueue_task(
+                -100123,
+                "second",
+                source="telegram-group",
+                ephemeral=True,
+                restricted=True,
+                requester_id=789,
+            )
+            third = store.enqueue_task(
+                -100123,
+                "third",
+                source="telegram-group",
+                ephemeral=True,
+                restricted=True,
+                requester_id=456,
+            )
+
+            claimed_first = store.claim_next_task(now=third.created_at + 1)
+            claimed_second = store.claim_next_task(now=third.created_at + 1)
+            self.assertEqual({claimed_first.id, claimed_second.id}, {first.id, second.id})
+            self.assertIsNone(store.claim_next_task(now=third.created_at + 1))
+
+            store.finish_task(claimed_first.id, "completed")
+            self.assertEqual(
+                store.claim_next_task(now=third.created_at + 2).id,
+                third.id,
+            )
+
     def test_due_reminder_enqueues_one_ephemeral_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")

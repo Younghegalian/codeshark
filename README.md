@@ -33,7 +33,7 @@ Telegram is the current remote inbox, not the product itself. The reasoning, too
 
 | Capability | What you get |
 |---|---|
-| Project work | Inspect, edit, test, and diagnose code inside a private workspace or explicitly delegated project roots. |
+| Project work | Inspect, edit, test, and diagnose code inside a private workspace, explicitly delegated project roots, or Codeshark's own checked-out repository. |
 | Persistent context | Continue the same Codex session across requests and process restarts without re-explaining the project every time. |
 | Durable memory | Recall useful preferences and project conventions, then load only the relevant memories and skills for the current task. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
@@ -41,7 +41,7 @@ Telegram is the current remote inbox, not the product itself. The reasoning, too
 | Result delivery | Ask for a result file to be shown or sent, and receive an allowed workspace or project file as a Telegram document. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
 | Isolated group analysis | Let directly addressed group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
-| Service-grade operation | Persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
+| Service-grade operation | Run up to three independent tasks concurrently, persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
 
 The useful unit is a finished task:
 
@@ -76,7 +76,7 @@ and allowlisted tools     feedback, and bounded state
               Final result
 ```
 
-Interactive work continues a persisted Codex thread. Scheduled work runs ephemerally so background checks do not pollute that conversation. The queue executes one task at a time and survives service restarts.
+Interactive work continues a persisted Codex thread. Scheduled work runs ephemerally so background checks do not pollute that conversation. Up to three independent tasks run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
 
 ## Quick start
 
@@ -157,11 +157,21 @@ See [SECURITY.md](SECURITY.md) for the full threat boundary, credential handling
 
 `setup` writes a gitignored `config.local.toml`. Remote requests cannot change its paths or execution policy.
 
+Codeshark always identifies its own checked-out repository as a server-controlled root. It can inspect that source for self-maintenance requests and, after the normal administrator approval gate, modify it without requiring the owner to expose a new root through Telegram.
+
 Delegate one or more local project roots:
 
 ```toml
 delegated_roots = ["/Users/yourname/workspace"]
 ```
+
+Set the local parallel execution limit from one to three workers:
+
+```toml
+worker_count = 3
+```
+
+Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
 Keep read-only inspection roots separate:
 

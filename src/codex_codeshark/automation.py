@@ -38,6 +38,7 @@ class TaskRecord:
     approved: bool
     restricted: bool
     requester_id: int | None
+    reply_to_message_id: int | None
 
 
 @dataclass(frozen=True)
@@ -276,7 +277,8 @@ class AgentStore:
                     error TEXT NOT NULL DEFAULT '',
                     approved INTEGER NOT NULL DEFAULT 0,
                     restricted INTEGER NOT NULL DEFAULT 0,
-                    requester_id INTEGER
+                    requester_id INTEGER,
+                    reply_to_message_id INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS tasks_ready
                     ON tasks(status, due_at, created_at);
@@ -337,6 +339,8 @@ class AgentStore:
                 )
             if "requester_id" not in task_columns:
                 connection.execute("ALTER TABLE tasks ADD COLUMN requester_id INTEGER")
+            if "reply_to_message_id" not in task_columns:
+                connection.execute("ALTER TABLE tasks ADD COLUMN reply_to_message_id INTEGER")
             schedule_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(schedules)").fetchall()
             }
@@ -373,6 +377,7 @@ class AgentStore:
             approved=bool(row["approved"]),
             restricted=bool(row["restricted"]),
             requester_id=row["requester_id"],
+            reply_to_message_id=row["reply_to_message_id"],
         )
 
     @staticmethod
@@ -482,6 +487,7 @@ class AgentStore:
         requires_approval: bool = False,
         restricted: bool = False,
         requester_id: int | None = None,
+        reply_to_message_id: int | None = None,
         due_at: float | None = None,
     ) -> TaskRecord:
         now = time.time()
@@ -492,8 +498,8 @@ class AgentStore:
                 """
                 INSERT INTO tasks
                     (id, chat_id, prompt, source, ephemeral, status, created_at, due_at,
-                     restricted, requester_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     restricted, requester_id, reply_to_message_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -506,6 +512,7 @@ class AgentStore:
                     due_at or now,
                     int(restricted),
                     requester_id,
+                    reply_to_message_id,
                 ),
             )
         return self.get_task(task_id)
@@ -516,9 +523,23 @@ class AgentStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT * FROM tasks
-                WHERE status = 'queued' AND due_at <= ?
-                ORDER BY due_at, created_at LIMIT 1
+                SELECT candidate.* FROM tasks AS candidate
+                WHERE candidate.status = 'queued' AND candidate.due_at <= ?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM tasks AS active
+                    WHERE active.status = 'running'
+                      AND active.chat_id = candidate.chat_id
+                      AND (
+                        active.ephemeral = 0
+                        OR candidate.ephemeral = 0
+                        OR (
+                            active.restricted = 1
+                            AND candidate.restricted = 1
+                            AND active.requester_id = candidate.requester_id
+                        )
+                      )
+                  )
+                ORDER BY candidate.due_at, candidate.created_at LIMIT 1
                 """,
                 (current,),
             ).fetchone()
@@ -736,11 +757,18 @@ class AgentStore:
             ).fetchall()
         return [self._task(row) for row in rows]
 
-    def cancel_oldest_queued(self) -> str | None:
+    def cancel_oldest_queued(self, *, chat_id: int | None = None) -> str | None:
         with self._lock, self._connect() as connection:
-            row = connection.execute(
-                "SELECT id FROM tasks WHERE status = 'queued' ORDER BY created_at LIMIT 1"
-            ).fetchone()
+            if chat_id is None:
+                row = connection.execute(
+                    "SELECT id FROM tasks WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    "SELECT id FROM tasks WHERE status = 'queued' AND chat_id = ? "
+                    "ORDER BY created_at LIMIT 1",
+                    (chat_id,),
+                ).fetchone()
             if row is None:
                 return None
             connection.execute(

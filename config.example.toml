@@ -7,6 +7,9 @@ codex_model = "gpt-5.5"
 poll_timeout_seconds = 30
 task_timeout_seconds = 1800
 queue_size = 3
+# Run up to three independent Codex tasks concurrently. Persistent sessions in the
+# same chat remain serialized so their conversational context cannot race.
+worker_count = 3
 max_session_turns = 30
 memory_max_chars = 12000
 codex_network_access = false
