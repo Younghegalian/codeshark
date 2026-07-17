@@ -14,12 +14,14 @@ from codex_codeshark.migration import (
     import_personal_data,
 )
 from codex_codeshark.recall import RecallStore
+from codex_codeshark.vault import VaultStore
 
 
 class PersonalDataMigrationTests(unittest.TestCase):
     def _build_personal_data(self, runtime: Path) -> tuple[str, str]:
         memory = MemoryStore(runtime / "memory.json").add("Answer in English")
         skill = SkillStore(runtime / "skills").add("Testing", "Verify with unittest")
+        VaultStore(runtime / "vault.json").upsert("project", "Assistant", "Keep a personal vault")
         FeedbackStore(runtime / "feedback.jsonl").record(
             task_id="t-complete",
             rating="good",
@@ -84,6 +86,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
 
             exported = export_personal_data(archive, runtime_dir=source)
             self.assertIn("runtime/memory.json", exported.files)
+            self.assertIn("runtime/vault.json", exported.files)
             with zipfile.ZipFile(archive) as bundle:
                 names = set(bundle.namelist())
                 manifest = json.loads(bundle.read("manifest.json"))
@@ -98,6 +101,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
                 "Answer in English",
             )
             self.assertEqual(SkillStore(target / "skills").list()[0].name, "Testing")
+            self.assertEqual(VaultStore(target / "vault.json").list()[0].title, "Assistant")
             self.assertEqual(
                 LearningStore(target / "agent.db").list_pending()[0].title,
                 "Response preference",

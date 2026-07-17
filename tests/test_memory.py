@@ -11,6 +11,7 @@ from codex_codeshark.memory import (
     compose_prompt,
     compose_restricted_group_prompt,
 )
+from codex_codeshark.vault import VaultStore
 
 
 class MemoryStoreTests(unittest.TestCase):
@@ -165,6 +166,20 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertIn("unittest execution procedure", prompt)
             self.assertNotIn("production deployment procedure", prompt)
             self.assertEqual(skill_ids, (selected.id,))
+
+    def test_compose_prompt_includes_only_relevant_assistant_assets(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            vault = VaultStore(Path(directory) / "vault.json")
+            selected = vault.upsert("project", "Codeshark", "Local persistent Codex agent")
+            vault.upsert("person", "Sona", "Private owner context")
+            prompt, _, _ = compose_prompt(
+                "Update the Codeshark agent",
+                [],
+                assets=vault.select("Update the Codeshark agent"),
+            )
+            self.assertIn("Relevant assistant assets", prompt)
+            self.assertIn(selected.content, prompt)
+            self.assertNotIn("Private owner context", prompt)
 
 
 class FeedbackStoreTests(unittest.TestCase):

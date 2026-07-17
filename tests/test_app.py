@@ -5,7 +5,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from codex_codeshark.app import HELP_TEXT, AgentApp
+from codex_codeshark.app import HELP_TEXT, ActiveTask, AgentApp
 from codex_codeshark.codex_runner import RunResult
 from codex_codeshark.config import Config
 from codex_codeshark.identity import (
@@ -43,6 +43,7 @@ class FakeCodexRunner:
         self.prompts = []
         self.deleted_sessions = []
         self.delete_error = None
+        self.steers = []
         self.results = [
             result
             or RunResult(
@@ -70,6 +71,10 @@ class FakeCodexRunner:
 
     def cancel(self) -> bool:
         return False
+
+    def steer(self, prompt: str) -> bool:
+        self.steers.append(prompt)
+        return True
 
     def delete_session(self, thread_id) -> None:
         if self.delete_error:
@@ -621,6 +626,56 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.store.pending_count(), 1)
         self.assertEqual(self.api.messages, [])
 
+    def test_private_follow_up_steers_an_active_safe_task(self) -> None:
+        runner = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "inspect the project",
+            source="telegram",
+            ephemeral=False,
+        )
+        with self.app._status_lock:
+            self.app._active_tasks[task.id] = ActiveTask(task, runner)
+
+        self.app._handle_update(self.update(123, "also report the likely root cause"))
+
+        self.assertEqual(runner.steers, ["also report the likely root cause"])
+        self.assertEqual(self.app.store.pending_count(), 1)
+        self.assertEqual(self.api.messages[-1][1], "Steering the active task.")
+
+    def test_risky_private_follow_up_is_queued_for_its_own_approval(self) -> None:
+        runner = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "inspect the project",
+            source="telegram",
+            ephemeral=False,
+        )
+        with self.app._status_lock:
+            self.app._active_tasks[task.id] = ActiveTask(task, runner)
+
+        self.app._handle_update(self.update(123, "deploy this to production"))
+
+        self.assertEqual(runner.steers, [])
+        queued = self.app.store.list_tasks()[0]
+        self.assertEqual(queued.status, "awaiting_approval")
+
+    def test_private_follow_up_does_not_steer_an_ephemeral_task(self) -> None:
+        runner = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "check the service",
+            source="scheduled",
+            ephemeral=True,
+        )
+        with self.app._status_lock:
+            self.app._active_tasks[task.id] = ActiveTask(task, runner)
+
+        self.app._handle_update(self.update(123, "also report the likely root cause"))
+
+        self.assertEqual(runner.steers, [])
+        self.assertEqual(self.app.store.pending_count(), 2)
+
     def test_remember_list_and_forget_commands(self) -> None:
         self.app._handle_update(self.update(123, "/remember Answer in English"))
         self.assertIn("m1", self.api.messages[-1][1])
@@ -631,6 +686,28 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, "/forget m1"))
         self.assertIn("Deleted", self.api.messages[-1][1])
         self.assertEqual(self.app.memory.list(), [])
+
+    def test_administrator_can_store_and_use_relevant_assistant_assets(self) -> None:
+        self.app._handle_update(
+            self.update(
+                123,
+                "/save project | Codeshark | Local persistent Codex agent",
+            )
+        )
+        asset = self.app.vault.list()[0]
+        self.assertEqual((asset.kind, asset.title), ("project", "Codeshark"))
+
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+        self.app._handle_update(self.update(123, "Update the Codeshark agent"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+        self.assertIn(asset.content, runner.prompts[0][0])
+
+        self.app._handle_update(self.update(123, "/vault Codeshark"))
+        self.assertIn(asset.id, self.api.messages[-1][1])
+        self.app._handle_update(self.update(123, f"/forget_asset {asset.id}"))
+        self.assertEqual(self.app.vault.list(), [])
 
     def test_new_deletes_current_session_before_clearing_it(self) -> None:
         runner = FakeCodexRunner()

@@ -36,7 +36,7 @@ PYTHONPATH=src python3 -m codex_codeshark doctor
 
 ## Private-chat commands
 
-Plain text queues a task in the current interactive Codex session. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction. Up to three independent tasks may run in parallel, while tasks in the same persistent chat remain ordered to protect that chat's session.
+Plain text queues a task in the current interactive Codex session. If a private-chat task is already running, a safe follow-up message is injected into that active Codex turn, so instructions such as "also check the failing test" keep the same working context instead of creating another queue item. A follow-up that independently requires approval remains a separate approval-gated task. A photo or document is stored under the private, gitignored `workspace/inbox/` directory and its caption becomes the task instruction. Up to three independent tasks may run in parallel, while tasks in the same persistent chat remain ordered to protect that chat's session.
 
 On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information. To introduce the owner in groups, set a separate explicit public card; private owner context is never shared there.
 
@@ -46,7 +46,7 @@ To receive a generated or existing result file, ask naturally (for example, `작
 
 | Command | Purpose |
 |---|---|
-| Plain text | Queue work in the current Codex session; receive only the final result. |
+| Plain text | Queue work in the current Codex session, or steer the active private task when safe; receive only the final result. |
 | Photo or document | Store the attachment privately and queue its caption as the task. |
 | `/status` | Show active work, queue depth, session capacity, model, and stored item counts. |
 | `/tasks` | List recent persistent task records. |
@@ -63,6 +63,9 @@ To receive a generated or existing result file, ask naturally (for example, `작
 | `/memories` | List learned memories. |
 | `/forget ID` | Delete a memory. |
 | `/recall QUERY` | Search approved memories and skills with provenance. |
+| `/save KIND \| TITLE \| CONTENT` | Store a structured assistant asset (`project`, `person`, `commitment`, `decision`, `preference`, or `knowledge`). |
+| `/vault [QUERY]` | List relevant assistant assets. |
+| `/forget_asset ID` | Delete one assistant asset. |
 | `/review_memories` | List unused, stale, or negatively rated memories. |
 | `/learn memory TEXT` | Add or update a memory immediately. |
 | `/learn skill NAME \| PROCEDURE` | Add or update a reusable skill immediately. |
@@ -71,6 +74,12 @@ To receive a generated or existing result file, ask naturally (for example, `작
 | `/forget_skill ID` | Delete an approved skill. |
 | `/good [NOTE]` | Positively rate the last successful task. |
 | `/bad [REASON]` | Negatively rate the last successful task. |
+
+Assistant assets are private administrator context. They are selected only when relevant to a private administrator task and never enter group prompts.
+
+## Personal vault migration
+
+The same ChatGPT/OpenAI login authenticates Codex, but it is not used as a Codeshark data store. To move private memories, skills, and assistant assets automatically between Macs, configure the same user-controlled private sync folder locally on each machine, push from the source, then pull on the new Mac before starting the service. See the [migration instructions](../README.md#bounded-state-and-migration). Chat messages cannot configure this folder.
 
 ### Approvals and automation
 

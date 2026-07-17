@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shutil
 import signal
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -87,6 +89,11 @@ class CodexRunner:
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
         self._cancel_requested = False
+        self._active_thread_id: str | None = None
+        self._active_turn_id: str | None = None
+        self._turn_steerable = False
+        self._pending_steers: list[str] = []
+        self._next_rpc_id = 10
 
     def _mcp_config_args(
         self,
@@ -285,6 +292,28 @@ class CodexRunner:
             thread_id,
         ]
 
+    def build_app_server_command(
+        self,
+        *,
+        approved: bool,
+        full_access: bool,
+    ) -> list[str]:
+        command = [str(self.binary), "-C", str(self.workdir)]
+        if full_access:
+            command.extend(self._full_access_config_args())
+        elif approved:
+            command.extend(
+                [
+                    "-c",
+                    "sandbox_workspace_write.network_access="
+                    + str(self.network_access).lower(),
+                    *self._mcp_config_args(),
+                ]
+            )
+        else:
+            command.extend(self._unapproved_config_args())
+        return [*command, "app-server", "--stdio", "--strict-config"]
+
     def delete_session(self, thread_id: str) -> None:
         env = self._child_env()
         try:
@@ -304,6 +333,32 @@ class CodexRunner:
             raise RuntimeError(details)
 
     def run(
+        self,
+        prompt: str,
+        thread_id: str | None,
+        *,
+        ephemeral: bool = False,
+        restricted: bool = False,
+        approved: bool = False,
+        full_access: bool = False,
+    ) -> RunResult:
+        if not ephemeral and not restricted:
+            return self._run_app_server(
+                prompt,
+                thread_id,
+                approved=approved,
+                full_access=full_access,
+            )
+        return self._run_exec(
+            prompt,
+            thread_id,
+            ephemeral=ephemeral,
+            restricted=restricted,
+            approved=approved,
+            full_access=full_access,
+        )
+
+    def _run_exec(
         self,
         prompt: str,
         thread_id: str | None,
@@ -360,6 +415,292 @@ class CodexRunner:
             cancelled=cancelled,
             timed_out=timed_out,
         )
+
+    def _run_app_server(
+        self,
+        prompt: str,
+        thread_id: str | None,
+        *,
+        approved: bool,
+        full_access: bool,
+    ) -> RunResult:
+        command = self.build_app_server_command(approved=approved, full_access=full_access)
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=self.workdir,
+            env=self._child_env(),
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + self.timeout_seconds
+        active_thread_id = thread_id
+        messages: list[str] = []
+        streamed_message = ""
+        timed_out = False
+        exit_code = 1
+        error_message = ""
+        with self._lock:
+            self._cancel_requested = False
+            self._process = process
+            self._active_thread_id = thread_id
+            self._active_turn_id = None
+            self._turn_steerable = False
+            self._pending_steers = []
+        try:
+            initialized = self._server_request(
+                process,
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "codeshark",
+                        "title": "Codeshark",
+                        "version": "0.1.0",
+                    }
+                },
+                deadline,
+            )
+            if "error" in initialized:
+                error_message = self._server_error(initialized)
+                return RunResult(1, "", active_thread_id, error_message)
+            self._server_notify(process, "initialized", {})
+            if active_thread_id:
+                thread_response = self._server_request(
+                    process,
+                    "thread/resume",
+                    {"threadId": active_thread_id, "cwd": str(self.workdir)},
+                    deadline,
+                )
+            else:
+                thread_response = self._server_request(
+                    process,
+                    "thread/start",
+                    {"cwd": str(self.workdir), "model": self.model},
+                    deadline,
+                )
+            if "error" in thread_response:
+                error_message = self._server_error(thread_response)
+                return RunResult(1, "", active_thread_id, error_message)
+            returned_thread = thread_response.get("result", {}).get("thread", {}).get("id")
+            if isinstance(returned_thread, str):
+                active_thread_id = returned_thread
+            if not active_thread_id:
+                return RunResult(1, "", None, "Codex app-server did not return a thread ID")
+            with self._lock:
+                self._active_thread_id = active_thread_id
+            turn_response = self._server_request(
+                process,
+                "turn/start",
+                {
+                    "threadId": active_thread_id,
+                    "input": [{"type": "text", "text": prompt}],
+                    "cwd": str(self.workdir),
+                    "approvalPolicy": "never",
+                    "sandboxPolicy": self._app_server_sandbox(
+                        approved=approved,
+                        full_access=full_access,
+                    ),
+                    "model": self.model,
+                    "effort": self.model_reasoning_effort,
+                },
+                deadline,
+            )
+            if "error" in turn_response:
+                error_message = self._server_error(turn_response)
+                return RunResult(1, "", active_thread_id, error_message)
+            returned_turn = turn_response.get("result", {}).get("turn", {}).get("id")
+            if not isinstance(returned_turn, str):
+                return RunResult(1, "", active_thread_id, "Codex app-server did not return a turn ID")
+            with self._lock:
+                self._active_turn_id = returned_turn
+
+            while True:
+                event = self._read_server_message(process, deadline)
+                if event is None:
+                    timed_out = True
+                    error_message = "Codex app-server timed out"
+                    break
+                method = event.get("method")
+                params = event.get("params")
+                if method == "turn/started" and isinstance(params, dict):
+                    turn = params.get("turn")
+                    started_turn = turn.get("id") if isinstance(turn, dict) else None
+                    if started_turn == returned_turn:
+                        with self._lock:
+                            self._turn_steerable = True
+                        self._flush_pending_steers(process)
+                elif method == "item/completed" and isinstance(params, dict):
+                    item = params.get("item")
+                    if isinstance(item, dict) and item.get("type") in {
+                        "agentMessage",
+                        "agent_message",
+                    }:
+                        text = item.get("text")
+                        if isinstance(text, str) and text.strip():
+                            messages.append(text.strip())
+                elif method == "item/agentMessage/delta" and isinstance(params, dict):
+                    delta = params.get("delta")
+                    if isinstance(delta, str):
+                        streamed_message += delta
+                elif method == "turn/completed" and isinstance(params, dict):
+                    turn = params.get("turn")
+                    status = turn.get("status") if isinstance(turn, dict) else "failed"
+                    if status == "completed":
+                        exit_code = 0
+                    else:
+                        error = turn.get("error") if isinstance(turn, dict) else None
+                        error_message = (
+                            error.get("message", "Codex turn did not complete")
+                            if isinstance(error, dict)
+                            else "Codex turn did not complete"
+                        )
+                    with self._lock:
+                        self._turn_steerable = False
+                    break
+        except (BrokenPipeError, OSError, RuntimeError, ValueError) as exc:
+            error_message = str(exc) or "Codex app-server failed"
+        finally:
+            self._terminate(process)
+            stderr = process.stderr.read().strip() if process.stderr is not None else ""
+            with self._lock:
+                cancelled = self._cancel_requested
+                self._process = None
+                self._active_thread_id = None
+                self._active_turn_id = None
+                self._turn_steerable = False
+                self._pending_steers = []
+        message = messages[-1] if messages else streamed_message.strip()
+        return RunResult(
+            exit_code=exit_code,
+            message=message,
+            thread_id=active_thread_id,
+            stderr="\n".join(part for part in (error_message, stderr) if part),
+            cancelled=cancelled,
+            timed_out=timed_out,
+        )
+
+    def steer(self, prompt: str) -> bool:
+        text = prompt.strip()
+        if not text:
+            return False
+        with self._lock:
+            process = self._process
+            if process is None or process.poll() is not None:
+                return False
+            if not self._turn_steerable or not self._active_thread_id or not self._active_turn_id:
+                if len(self._pending_steers) >= 10 or sum(map(len, self._pending_steers)) + len(text) > 8_000:
+                    return False
+                self._pending_steers.append(text)
+                return True
+            return self._send_steer_locked(process, text)
+
+    def _app_server_sandbox(self, *, approved: bool, full_access: bool) -> dict[str, object]:
+        if full_access:
+            return {"type": "dangerFullAccess"}
+        if not approved:
+            return {"type": "readOnly", "networkAccess": False}
+        roots = tuple(dict.fromkeys((self.workdir, *self.additional_write_roots)))
+        return {
+            "type": "workspaceWrite",
+            "writableRoots": [str(path) for path in roots],
+            "networkAccess": self.network_access,
+        }
+
+    def _server_request(
+        self,
+        process: subprocess.Popen[str],
+        method: str,
+        params: dict[str, object],
+        deadline: float,
+    ) -> dict[str, object]:
+        with self._lock:
+            request_id = self._next_rpc_id
+            self._next_rpc_id += 1
+            self._write_server_message(process, {"method": method, "id": request_id, "params": params})
+        while True:
+            message = self._read_server_message(process, deadline)
+            if message is None:
+                raise RuntimeError(f"Codex app-server timed out during {method}")
+            if message.get("id") == request_id:
+                return message
+
+    def _server_notify(
+        self,
+        process: subprocess.Popen[str],
+        method: str,
+        params: dict[str, object],
+    ) -> None:
+        with self._lock:
+            self._write_server_message(process, {"method": method, "params": params})
+
+    def _read_server_message(
+        self,
+        process: subprocess.Popen[str],
+        deadline: float,
+    ) -> dict[str, object] | None:
+        if process.stdout is None:
+            raise RuntimeError("Codex app-server stdout is unavailable")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        ready, _, _ = select.select([process.stdout], [], [], remaining)
+        if not ready:
+            return None
+        line = process.stdout.readline()
+        if not line:
+            raise RuntimeError("Codex app-server closed its protocol stream")
+        try:
+            message = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Codex app-server returned invalid JSON") from exc
+        if not isinstance(message, dict):
+            raise RuntimeError("Codex app-server returned an invalid protocol message")
+        return message
+
+    def _flush_pending_steers(self, process: subprocess.Popen[str]) -> None:
+        with self._lock:
+            pending = self._pending_steers
+            self._pending_steers = []
+            for prompt in pending:
+                self._send_steer_locked(process, prompt)
+
+    def _send_steer_locked(self, process: subprocess.Popen[str], prompt: str) -> bool:
+        if not self._active_thread_id or not self._active_turn_id:
+            return False
+        request_id = self._next_rpc_id
+        self._next_rpc_id += 1
+        try:
+            self._write_server_message(
+                process,
+                {
+                    "method": "turn/steer",
+                    "id": request_id,
+                    "params": {
+                        "threadId": self._active_thread_id,
+                        "expectedTurnId": self._active_turn_id,
+                        "input": [{"type": "text", "text": prompt}],
+                    },
+                },
+            )
+        except (BrokenPipeError, OSError):
+            return False
+        return True
+
+    @staticmethod
+    def _write_server_message(process: subprocess.Popen[str], message: dict[str, object]) -> None:
+        if process.stdin is None:
+            raise RuntimeError("Codex app-server stdin is unavailable")
+        process.stdin.write(json.dumps(message, separators=(",", ":")) + "\n")
+        process.stdin.flush()
+
+    @staticmethod
+    def _server_error(message: dict[str, object]) -> str:
+        error = message.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"]
+        return "Codex app-server request failed"
 
     def _cleanup_restricted_home(self) -> None:
         if self.restricted_codex_home is None or not self.restricted_codex_home.is_dir():

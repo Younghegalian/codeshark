@@ -7,6 +7,7 @@ from pathlib import Path
 from .app import AgentApp
 from .config import (
     ConfigError,
+    PROJECT_ROOT,
     load_bot_token,
     load_config,
     validate_codex_profile,
@@ -15,6 +16,7 @@ from .config import (
 )
 from .doctor import run_doctor
 from .migration import MigrationError, export_personal_data, import_personal_data
+from .personal_sync import PersonalDataSync, PersonalSyncError
 from .service import (
     ServiceError,
     read_logs,
@@ -50,6 +52,15 @@ def build_parser() -> argparse.ArgumentParser:
             action="store_true",
             help="replace an existing archive or local personal data",
         )
+    sync = commands.add_parser("sync-data", help="configure private personal-data sync")
+    sync_commands = sync.add_subparsers(dest="sync_command", required=True)
+    enable = sync_commands.add_parser("enable", help="set a private sync directory")
+    enable.add_argument("directory", type=Path)
+    sync_commands.add_parser("status", help="show personal-data sync status")
+    sync_commands.add_parser("push", help="write a current private archive to the sync directory")
+    pull = sync_commands.add_parser("pull", help="replace local personal data from the sync directory")
+    pull.add_argument("--force", action="store_true", help="replace existing local personal data")
+    sync_commands.add_parser("disable", help="disable automatic personal-data backup")
     return parser
 
 
@@ -93,6 +104,30 @@ def main() -> int:
             print(f"Import complete: {result.archive} ({len(result.files)} files)")
             print("Scheduled jobs were imported as paused. Review and resume them in Telegram.")
             return 0
+        if args.command == "sync-data":
+            sync = PersonalDataSync(PROJECT_ROOT / "runtime")
+            if args.sync_command == "enable":
+                status = sync.configure(args.directory)
+                print(f"Personal sync directory configured: {status.directory}")
+                print("Run `sync-data push` on this Mac, or `sync-data pull --force` on a new Mac.")
+                return 0
+            if args.sync_command == "status":
+                status = sync.status()
+                if status.directory is None:
+                    print("Personal sync: disabled")
+                else:
+                    mode = "automatic backup enabled" if status.automatic else "configured; initial push or pull required"
+                    print(f"Personal sync: {mode}\nDirectory: {status.directory}")
+                return 0
+            if args.sync_command == "disable":
+                sync.disable()
+                print("Personal sync disabled.")
+                return 0
+            if args.sync_command == "pull" and service_status().running:
+                raise PersonalSyncError("stop the background service before replacing personal data")
+            result = sync.pull(replace=args.force) if args.sync_command == "pull" else sync.push()
+            print(f"Personal sync {args.sync_command} complete: {result.archive} ({len(result.files)} files)")
+            return 0
         config = load_config()
         validate_codex_version(config.codex_binary)
         validate_codex_profile(config)
@@ -100,8 +135,8 @@ def main() -> int:
         token = load_bot_token()
         AgentApp(config, TelegramAPI(token)).run_forever()
         return 0
-    except (ConfigError, MigrationError, ServiceError, TelegramError, KeyboardInterrupt) as exc:
-        if isinstance(exc, (ConfigError, MigrationError, ServiceError, TelegramError)):
+    except (ConfigError, MigrationError, PersonalSyncError, ServiceError, TelegramError, KeyboardInterrupt) as exc:
+        if isinstance(exc, (ConfigError, MigrationError, PersonalSyncError, ServiceError, TelegramError)):
             logging.error("%s", exc)
             return 1
         return 130

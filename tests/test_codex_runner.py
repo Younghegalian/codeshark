@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+from unittest.mock import Mock
 import tempfile
 import unittest
 from pathlib import Path
@@ -72,6 +73,22 @@ class CodexRunnerTests(unittest.TestCase):
         kwargs = run.call_args.kwargs
         self.assertNotIn("TELEGRAM_BOT_TOKEN", kwargs["env"])
         self.assertEqual(kwargs["timeout"], 30)
+
+    def test_steer_writes_a_turn_steer_request_for_an_active_app_server_turn(self) -> None:
+        process = Mock()
+        process.poll.return_value = None
+        process.stdin = Mock()
+        self.runner._process = process
+        self.runner._active_thread_id = "thread-1"
+        self.runner._active_turn_id = "turn-1"
+        self.runner._turn_steerable = True
+
+        self.assertTrue(self.runner.steer("focus on tests"))
+
+        payload = process.stdin.write.call_args.args[0]
+        self.assertIn('"method":"turn/steer"', payload)
+        self.assertIn('"expectedTurnId":"turn-1"', payload)
+        self.assertIn('focus on tests', payload)
 
     def test_child_environment_uses_strict_allowlist(self) -> None:
         with patch.dict(

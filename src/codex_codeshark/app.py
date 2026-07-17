@@ -38,16 +38,18 @@ from .memory import (
     compose_prompt,
     compose_restricted_group_prompt,
 )
+from .personal_sync import PersonalDataSync, PersonalSyncError
 from .recall import RecallStore
 from .state import StateStore
 from .telegram_api import TelegramAPI, TelegramError
+from .vault import ASSET_KINDS, VaultStore
 
 
 LOGGER = logging.getLogger(__name__)
 
 HELP_TEXT = """Codex-codeshark
 
-Plain text: submit a task to the current Codex session
+Plain text: submit a task or steer active private work
 /status: show the active task, queue, and session
 /new: delete the current session and start fresh
 /name NAME: set Codeshark's self-introduction name
@@ -55,6 +57,8 @@ Plain text: submit a task to the current Codex session
 /remember TEXT: explicitly store a long-term memory
 /memories, /forget ID: manage long-term memories
 /recall QUERY: search learned memories and skills with provenance
+/save KIND | TITLE | CONTENT: store an assistant asset
+/vault [QUERY], /forget_asset ID: inspect or delete assistant assets
 /review_memories: review unused, stale, or poorly rated memories
 /learn memory TEXT: immediately store or update a memory
 /learn skill NAME | PROCEDURE: immediately store or update a reusable skill
@@ -178,6 +182,8 @@ class AgentApp:
             runtime_dir / "memory.json",
             max_total_chars=config.memory_max_chars,
         )
+        self.vault = VaultStore(runtime_dir / "vault.json")
+        self.personal_sync = PersonalDataSync(runtime_dir)
         self.feedback = FeedbackStore(runtime_dir / "feedback.jsonl")
         self.learning = LearningStore(database_path)
         self.skills = SkillStore(runtime_dir / "skills")
@@ -326,6 +332,8 @@ class AgentApp:
         if self._handle_admin_command(chat_id, command, argument):
             return
 
+        if self._steer_active_private_task(chat_id, text, reply_to_message_id):
+            return
         self._request_owner_onboarding(chat_id)
         self._enqueue_user_task(chat_id, text, reply_to_message_id=reply_to_message_id)
 
@@ -346,6 +354,12 @@ class AgentApp:
             self._send_chunks(chat_id, self._memories_text())
         elif command == "/recall":
             self._send_chunks(chat_id, self._recall_text(argument))
+        elif command == "/save":
+            self._save_asset(chat_id, argument)
+        elif command == "/vault":
+            self._send_chunks(chat_id, self._vault_text(argument))
+        elif command in {"/forget-asset", "/forget_asset"}:
+            self._forget_asset(chat_id, argument)
         elif command in {"/review-memories", "/review_memories"}:
             self._send_chunks(chat_id, self._review_memories_text())
         elif command == "/forget":
@@ -745,6 +759,7 @@ class AgentApp:
                 task.prompt,
                 self.memory.list(),
                 selected_skills,
+                assets=self.vault.select(task.prompt),
                 external_action_approved=effective_approval,
                 task_id=task.id,
                 read_only_roots=(
@@ -831,6 +846,8 @@ class AgentApp:
                     if successful
                     else None
                 )
+            if successful:
+                self._backup_personal_data()
         return result
 
     def _rotate_session_if_needed(self, chat_id: int, runner: CodexRunner) -> None:
@@ -1028,6 +1045,36 @@ class AgentApp:
             self._wake_worker.set()
         return True
 
+    def _steer_active_private_task(
+        self,
+        chat_id: int,
+        prompt: str,
+        reply_to_message_id: int | None,
+    ) -> bool:
+        if self._requires_admin_approval(prompt):
+            return False
+        with self._status_lock:
+            active = next(
+                (
+                    item
+                    for item in self._active_tasks.values()
+                    if (
+                        item.task.chat_id == chat_id
+                        and not item.task.restricted
+                        and not item.task.ephemeral
+                    )
+                ),
+                None,
+            )
+        if active is None or not active.runner.steer(prompt):
+            return False
+        self._send_message(
+            chat_id,
+            "Steering the active task.",
+            reply_to_message_id=reply_to_message_id,
+        )
+        return True
+
     def _agent_name(self) -> str:
         item = self.memory.find_by_title(AGENT_NAME_TITLE)
         if item is None or not item.text.startswith("Name: "):
@@ -1065,6 +1112,7 @@ class AgentApp:
             self._send_message(chat_id, f"Could not change the agent name: {exc}")
             return
         self._send_message(chat_id, f"Agent name changed to {name}.")
+        self._backup_personal_data()
 
     def _set_public_owner_card(self, chat_id: int, argument: str) -> None:
         card = " ".join(argument.split())
@@ -1073,6 +1121,7 @@ class AgentApp:
             if existing is not None:
                 self.memory.forget(existing.id)
             self._send_message(chat_id, "Public owner card cleared.")
+            self._backup_personal_data()
             return
         if not card:
             self._send_message(chat_id, "Usage: /owner_public TEXT (or /owner_public clear)")
@@ -1089,6 +1138,7 @@ class AgentApp:
             self._send_message(chat_id, f"Could not update the public owner card: {exc}")
             return
         self._send_message(chat_id, "Public owner card updated.")
+        self._backup_personal_data()
 
     def _requires_admin_approval(self, prompt: str) -> bool:
         return not self.config.admin_full_access and self.risk_policy.requires_approval(prompt)
@@ -1228,6 +1278,7 @@ class AgentApp:
             created_at=item.created_at,
         )
         self._send_message(chat_id, f"Stored long-term memory {item.id}.")
+        self._backup_personal_data()
 
     def _forget_memory(self, chat_id: int, argument: str) -> None:
         if not argument:
@@ -1235,8 +1286,35 @@ class AgentApp:
         elif self.memory.forget(argument):
             self.recall.delete("memory", argument)
             self._send_message(chat_id, f"Deleted long-term memory {argument}.")
+            self._backup_personal_data()
         else:
             self._send_message(chat_id, f"Long-term memory {argument} was not found.")
+
+    def _save_asset(self, chat_id: int, argument: str) -> None:
+        kind, separator, remainder = argument.partition("|")
+        title, separator_two, content = remainder.partition("|") if separator else ("", "", "")
+        if not separator or not separator_two:
+            self._send_message(
+                chat_id,
+                "Usage: /save KIND | TITLE | CONTENT (KIND: " + ", ".join(ASSET_KINDS) + ")",
+            )
+            return
+        try:
+            asset = self.vault.upsert(kind, title, content)
+        except ValueError as exc:
+            self._send_message(chat_id, f"Could not save the assistant asset: {exc}")
+            return
+        self._send_message(chat_id, f"Saved assistant asset {asset.id} ({asset.kind}).")
+        self._backup_personal_data()
+
+    def _forget_asset(self, chat_id: int, argument: str) -> None:
+        if not argument:
+            self._send_message(chat_id, "Usage: /forget_asset ASSET_ID")
+        elif self.vault.forget(argument):
+            self._send_message(chat_id, f"Deleted assistant asset {argument}.")
+            self._backup_personal_data()
+        else:
+            self._send_message(chat_id, f"Assistant asset {argument} was not found.")
 
     def _learn(self, chat_id: int, argument: str) -> None:
         kind, separator, content = argument.partition(" ")
@@ -1274,6 +1352,7 @@ class AgentApp:
             chat_id,
             f"Learned {kind} {source_id}.",
         )
+        self._backup_personal_data()
 
     def _approve(self, chat_id: int, item_id: str) -> None:
         if item_id.startswith("l"):
@@ -1288,6 +1367,7 @@ class AgentApp:
                 return
             self.learning.set_status(item_id, "approved")
             self._send_message(chat_id, f"Approved and applied learning proposal {item_id}.")
+            self._backup_personal_data()
             return
         if self.store.approve(item_id):
             self._wake_worker.set()
@@ -1302,6 +1382,8 @@ class AgentApp:
             changed = self.store.reject(item_id)
         if changed:
             self._send_message(chat_id, f"Rejected {item_id}.")
+            if item_id.startswith("l"):
+                self._backup_personal_data()
         else:
             self._send_message(chat_id, "No pending item was found for that ID.")
 
@@ -1309,6 +1391,7 @@ class AgentApp:
         if self.skills.forget(skill_id):
             self.recall.delete("skill", skill_id)
             self._send_message(chat_id, f"Deleted skill {skill_id}.")
+            self._backup_personal_data()
         else:
             self._send_message(chat_id, "No skill was found for that ID.")
 
@@ -1461,6 +1544,7 @@ class AgentApp:
                 f"Codex session: {session}",
                 f"Session turns: {snapshot.session_turn_count}/{self.config.max_session_turns}",
                 f"Long-term memories: {len(self.memory.list())}",
+                f"Assistant assets: {len(self.vault.list())}",
                 f"Approved skills: {len(self.skills.list())}",
                 "Automatic learning: enabled",
                 f"Pending learning proposals: {len(self.learning.list_pending())}",
@@ -1514,6 +1598,21 @@ class AgentApp:
                 f"  uses={item.use_count}, good={item.good_count}, bad={item.bad_count}"
             )
         return "\n".join(lines)
+
+    def _vault_text(self, query: str) -> str:
+        assets = self.vault.select(query, max_chars=20_000)
+        if not assets:
+            return "No assistant assets matched that query." if query else "No assistant assets are stored."
+        heading = f'Assistant assets for "{query}":' if query else "Assistant assets:"
+        return "\n".join(
+            [heading, *[f"{item.id} [{item.kind}] {item.title}: {item.content}" for item in assets]]
+        )
+
+    def _backup_personal_data(self) -> None:
+        try:
+            self.personal_sync.backup_if_enabled()
+        except (OSError, RuntimeError, PersonalSyncError) as exc:
+            LOGGER.warning("personal data backup failed: %s", exc)
 
     def _review_memories_text(self) -> str:
         memories = self.recall.stale_memories()

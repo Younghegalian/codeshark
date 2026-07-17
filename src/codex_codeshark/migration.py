@@ -22,7 +22,7 @@ ARCHIVE_FORMAT = "codex-codeshark-personal-data"
 ARCHIVE_VERSION = 1
 MAX_ARCHIVE_BYTES = 100_000_000
 MAX_ARCHIVE_FILES = 500
-_RUNTIME_FILES = ("memory.json", "feedback.jsonl", "feedback.jsonl.1")
+_RUNTIME_FILES = ("memory.json", "vault.json", "feedback.jsonl", "feedback.jsonl.1")
 _SKILL_PATH = re.compile(r"runtime/skills/(?:index\.json|s[0-9]+/SKILL\.md)")
 
 

@@ -34,6 +34,7 @@ Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a 
 | Project work | Inspect, edit, test, and diagnose code inside a private workspace, explicitly delegated project roots, or Codeshark's own checked-out repository. |
 | Persistent context | Continue the same Codex session across requests and process restarts without re-explaining the project every time. |
 | Durable memory | Recall useful preferences and project conventions, then load only the relevant memories and skills for the current task. |
+| Assistant vault | Keep structured projects, decisions, commitments, people, preferences, and knowledge; inject only records relevant to the task. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Result delivery | Ask for a result file to be shown or sent, and receive an allowed workspace or project file as a Telegram document. |
@@ -74,7 +75,7 @@ and allowlisted tools     feedback, and bounded state
               Final result
 ```
 
-Interactive work continues a persisted Codex thread. Scheduled work runs ephemerally so background checks do not pollute that conversation. Up to three independent tasks run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
+Interactive work continues a persisted Codex thread. A safe private-chat follow-up sent during an active task steers that live Codex turn, retaining the same working context rather than adding another queue item. Scheduled work runs ephemerally so background checks do not pollute that conversation. Up to three independent tasks run concurrently, while tasks that share a persistent chat session remain serialized. The queue survives service restarts.
 
 ## Quick start
 
@@ -145,6 +146,8 @@ After a successful private task, the agent can identify a durable preference, wo
 Automatic learning is evidence-bound. An exact, non-secret statement from the current administrator request may be applied immediately. Inferred or transformed candidates remain pending for review. One-off details, speculation, credentials, and unnecessary sensitive data are excluded.
 
 Stable names update existing records rather than creating unbounded duplicates. Usage and explicit positive or negative feedback help rank equally relevant knowledge. Guest and scheduled runs never feed the learning loop.
+
+Use `/save KIND | TITLE | CONTENT` for durable structured facts that are broader than a one-line preference. Supported kinds are `project`, `person`, `commitment`, `decision`, `preference`, and `knowledge`. `/vault [QUERY]` lists relevant records and `/forget_asset ID` removes one. Vault records are private administrator context and never enter a group request.
 
 ## Security defaults
 
@@ -241,6 +244,21 @@ Import it after cloning and running `setup` on the new Mac:
 PYTHONPATH=src python3 -m codex_codeshark import-data \
   "$HOME/codeshark-personal-data.codeshark.zip" --force
 ```
+
+For opt-in automatic backup and one-command restore across Macs, configure the same private folder on both machines. This can be a folder synchronized by a storage provider you control. The source Mac must push first; the new Mac must pull before starting its background service:
+
+```bash
+# Source Mac
+PYTHONPATH=src python3 -m codex_codeshark sync-data enable "/private/synced/Codeshark"
+PYTHONPATH=src python3 -m codex_codeshark sync-data push
+
+# New Mac, after setup and before start
+PYTHONPATH=src python3 -m codex_codeshark sync-data enable "/private/synced/Codeshark"
+PYTHONPATH=src python3 -m codex_codeshark sync-data pull --force
+PYTHONPATH=src python3 -m codex_codeshark start
+```
+
+After the first successful push or pull, Codeshark refreshes that private archive after successful administrator work and personal-vault updates. The sync directory is configured only through the local CLI, never a chat message. It does not use, copy, or derive an OpenAI login token; the selected storage folder is the migration transport.
 
 Archives are versioned, checksummed, created with mode `0600`, and exclude tokens, local configuration, Codex session files, runtime logs, attachments, and guest authorization. They still contain personal content and local paths, so keep them private.
 
