@@ -23,10 +23,12 @@ class FakeTelegramAPI:
         self.message_replies = []
         self.documents = []
         self.document_replies = []
+        self.events = []
 
     def send_message(self, chat_id, text, *, reply_to_message_id=None) -> None:
         self.messages.append((chat_id, text))
         self.message_replies.append(reply_to_message_id)
+        self.events.append(("message", chat_id, text))
 
     def download_file(self, file_id, destination, *, max_bytes) -> int:
         destination.write_bytes(b"attachment")
@@ -35,6 +37,7 @@ class FakeTelegramAPI:
     def send_document(self, chat_id, document, *, max_bytes, reply_to_message_id=None) -> None:
         self.documents.append((chat_id, document, max_bytes))
         self.document_replies.append(reply_to_message_id)
+        self.events.append(("document", chat_id, document))
 
 
 class FakeCodexRunner:
@@ -1082,6 +1085,72 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
         self.assertEqual(self.api.documents, [(123, report.resolve(), self.app.config.attachment_max_bytes)])
         self.assertEqual(self.api.messages, [(123, "PDF here is the latest result.")])
+
+    def test_embedded_delivery_marker_is_never_sent_as_visible_text(self) -> None:
+        report = self.app.config.workdir / "final.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"Final PDF: [[CODESHARK_SEND_FILE: {report}]] is ready.",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "PDF 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertNotIn("CODESHARK_SEND_FILE", self.api.messages[0][1])
+        self.assertEqual(self.api.events[0][0], "document")
+
+    def test_inline_markdown_file_link_is_attached_before_the_summary(self) -> None:
+        report = self.app.config.workdir / "final.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"Final PDF: [{report.name}]({report}) is ready.",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "PDF 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(self.api.events[0][0], "document")
+        self.assertNotIn(str(report), self.api.messages[0][1])
+
+    def test_file_request_never_relays_a_false_delivery_claim_without_an_attachment(self) -> None:
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="I sent the PDF.",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "PDF 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents, [])
+        self.assertEqual(
+            self.api.messages,
+            [
+                (
+                    123,
+                    "The task completed, but no requested file was attached. "
+                    "Codeshark found no safe, readable output file to send.",
+                )
+            ],
+        )
 
     def test_final_artifact_request_delivers_the_completed_file_in_one_response(self) -> None:
         report = self.app.config.workdir / "completed-manuscript.pdf"
