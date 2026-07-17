@@ -356,6 +356,13 @@ class AgentStore:
                 connection.execute(
                     "ALTER TABLE schedules ADD COLUMN approved INTEGER NOT NULL DEFAULT 0"
                 )
+            self._prune_tasks(connection)
+            self._prune_schedules(connection)
+            self._prune_deliveries(connection)
+
+    def recover_interrupted_tasks(self) -> None:
+        """Return work interrupted by a gateway restart to its safe pending state."""
+        with self._lock, self._connect() as connection:
             connection.execute(
                 "UPDATE tasks SET status = 'awaiting_approval', started_at = NULL "
                 "WHERE status = 'running' AND approved = 1"
@@ -364,9 +371,6 @@ class AgentStore:
                 "UPDATE tasks SET status = 'queued', started_at = NULL "
                 "WHERE status = 'running' AND approved = 0"
             )
-            self._prune_tasks(connection)
-            self._prune_schedules(connection)
-            self._prune_deliveries(connection)
 
     @staticmethod
     def _task(row: sqlite3.Row | None) -> TaskRecord | None:

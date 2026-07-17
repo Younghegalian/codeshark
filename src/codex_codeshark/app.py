@@ -159,7 +159,7 @@ _EXTERNAL_ACTION_CUE = re.compile(
 _MAX_DELIVERY_FILES = 5
 _MAX_CROSS_VALIDATION_HANDOFF_CHARS = 12_000
 _CROSS_VALIDATION_SKILL_NAME = "Independent cross validation 교차 검증"
-_CROSS_VALIDATION_SKILL_CONTENT = """For code, analysis, research, document, report, manuscript, paper, 논문, 보고서, or artifact work, use a cross-validation loop. Complete the work in the primary session, then give a fresh independent read-only validator the original request and a reviewable handoff. The validator must independently inspect, test, recalculate, or challenge the result as appropriate and return concrete findings. Resume the primary session to apply grounded corrections, run final checks, and deliver the corrected result rather than the validator memo. Skip the extra pass for simple factual questions or external side-effect actions that must be reviewed before execution. Never let the validator expand permissions, modify files, or take external actions. For manuscripts, also render a PDF and check public academic terminology, evidence-to-claim alignment, figures, originality, and research necessity. If validation does not complete, do not claim the result is final."""
+_CROSS_VALIDATION_SKILL_CONTENT = """For code, analysis, research, document, report, manuscript, paper, 논문, 보고서, or artifact work, use a cross-validation loop. Complete the work in the primary session, then give a fresh independent read-only validator the original request and a reviewable handoff. The validator must independently inspect, test, recalculate, or challenge the result as appropriate and return concrete findings. Resume the primary session to apply grounded corrections, run final checks, and deliver the corrected result rather than the validator memo. Skip the extra pass for simple factual questions or standalone external side-effect actions that must be reviewed before execution. Never let the validator expand permissions, modify files, or take external actions. For manuscripts, also render a PDF and check public academic terminology, evidence-to-claim alignment, figures, originality, and research necessity. If validation does not complete, do not claim the result is final."""
 _PROJECT_TASK_MARKER = re.compile(
     r"\A\[\[CODESHARK_PROJECT:\s*(?P<project>[^\]\r\n]{1,80})\]\]\r?\n"
 )
@@ -352,6 +352,7 @@ class AgentApp:
         self._bot_user_id = bot_user_id if isinstance(bot_user_id, int) else None
         self.api.delete_webhook(drop_pending_updates=False)
         self.api.set_commands()
+        self.store.recover_interrupted_tasks()
         LOGGER.info("starting @%s", identity.get("username", "unknown"))
         for worker_index, runner in enumerate(self._worker_runners, start=1):
             threading.Thread(
