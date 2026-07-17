@@ -35,7 +35,7 @@ Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a 
 | Project-scoped context | Continue a separate Codex session for each named project across requests and process restarts. |
 | Durable memory | Keep long-term memories and assistant assets scoped to the active project; load only that project's records. |
 | Global identity and skills | Keep Codeshark's name, owner profile, and reusable skills available across projects without mixing project facts. |
-| Independent peer-review loop | For a manuscript or explicit independent-review request, draft in the author session, review in a fresh read-only session, then resume the author session to apply the findings. |
+| Independent cross-validation | For substantive code, analysis, research, document, or artifact work, run the primary task, validate it in a fresh read-only session, then resume the primary session to reconcile findings. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
 | Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. Use `/file_delivery on` to attach new final files automatically for a chat. |
@@ -331,7 +331,7 @@ Codex-codeshark is an early alpha with a deliberately narrow scope. The core per
 - [x] Isolated, read-only guest conversations
 - [x] First-class macOS service management and diagnostics
 - [x] Signed release checks and portable personal-data migration
-- [x] Independent author-reviewer-revision workflow for manuscript and explicit peer-review tasks
+- [x] Broad primary-validator-reconciliation workflow for substantive work, with manuscript review as one specialization
 
 Additional administrators, additional messaging channels, and broad user-programmable agent swarms are not current goals.
 

@@ -760,7 +760,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.runner = runner
 
         self.app._handle_update(self.update(123, "/project Research"))
-        self.app._handle_update(self.update(123, "analyze the study"))
+        self.app._handle_update(self.update(123, "Use the study context."))
         research_task = self.app.store.claim_next_task()
         self.app._execute_task(research_task)
         self.app.store.finish_task(research_task.id, "completed")
@@ -772,7 +772,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertNotIn("General-only context", research_prompt)
 
         self.app._handle_update(self.update(123, "/project General"))
-        self.app._handle_update(self.update(123, "continue general work"))
+        self.app._handle_update(self.update(123, "Continue the General context."))
         general_task = self.app.store.claim_next_task()
         self.app._execute_task(general_task)
 
@@ -878,7 +878,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
         remaining = self.app.skills.list()
         self.assertEqual(len(remaining), 1)
-        self.assertIn("manuscript", remaining[0].name.lower())
+        self.assertIn("cross validation", remaining[0].name.lower())
 
     def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
@@ -1064,7 +1064,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
+        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[-1][0])
         self.assertEqual(self.api.documents, [(123, report.resolve(), self.app.config.attachment_max_bytes)])
         self.assertEqual(self.api.messages, [])
 
@@ -1176,7 +1176,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.events[0][0], "document")
         self.assertEqual(self.api.messages, [(123, "The report is complete.")])
 
-    def test_independent_peer_review_runs_author_reviewer_and_revision_sessions(self) -> None:
+    def test_cross_validation_runs_primary_validator_and_reconciliation_sessions(self) -> None:
         app = AgentApp(replace(self.config, admin_full_access=True), self.api)
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
@@ -1215,20 +1215,20 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         app._execute_task(task)
 
         self.assertEqual(len(runner.prompts), 3)
-        self.assertIn("author-review-revise loop", runner.prompts[0][0])
-        self.assertIn("author phase", runner.prompts[0][0])
+        self.assertIn("cross-validation loop", runner.prompts[0][0])
+        self.assertIn("primary phase", runner.prompts[0][0])
         self.assertEqual(runner.prompts[0][1], None)
-        self.assertIn("reviewer phase", runner.prompts[1][0])
+        self.assertIn("validator phase", runner.prompts[1][0])
         self.assertEqual(runner.prompts[1][1], None)
         self.assertTrue(runner.prompts[1][2])
         self.assertFalse(runner.prompts[1][4])
         self.assertFalse(runner.prompts[1][5])
-        self.assertIn("revision phase", runner.prompts[2][0])
+        self.assertIn("reconciliation phase", runner.prompts[2][0])
         self.assertIn("Clarify the causal claim", runner.prompts[2][0])
         self.assertEqual(runner.prompts[2][1], "author-thread")
         self.assertEqual(self.api.messages, [(123, "Revised manuscript is complete.")])
 
-    def test_peer_review_workflow_requires_approval_without_full_access(self) -> None:
+    def test_writable_cross_validation_requires_approval_without_full_access(self) -> None:
         self.app._handle_update(
             self.update(
                 123,
@@ -1239,7 +1239,60 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.list_tasks()[0]
         self.assertEqual(task.status, "awaiting_approval")
 
-    def test_peer_review_failure_never_returns_an_unapplied_review_as_final(self) -> None:
+    def test_explicit_cross_validation_is_not_skipped_before_a_later_push(self) -> None:
+        self.assertTrue(
+            self.app._cross_validation_requested(
+                "Implement the patch, cross validate it, then push the branch."
+            )
+        )
+        self.assertFalse(self.app._cross_validation_requested("Push the existing branch."))
+
+    def test_cross_validation_applies_to_substantive_read_only_analysis(self) -> None:
+        runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Primary analysis: the trend is caused by missing records.",
+                thread_id="analysis-thread",
+                stderr="",
+            )
+        )
+        runner.results.extend(
+            [
+                RunResult(
+                    exit_code=0,
+                    message="1. Pass: the missing-record count supports the conclusion.",
+                    thread_id="validator-thread",
+                    stderr="",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="The independently validated analysis is complete.",
+                    thread_id="analysis-thread",
+                    stderr="",
+                ),
+            ]
+        )
+        self.app.runner = runner
+
+        self.app._handle_update(
+            self.update(123, "Analyze the failure pattern and cross validate the conclusion.")
+        )
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.app._execute_task(task)
+
+        self.assertEqual(len(runner.prompts), 3)
+        self.assertFalse(runner.prompts[0][4])
+        self.assertFalse(runner.prompts[0][5])
+        self.assertTrue(runner.prompts[1][2])
+        self.assertFalse(runner.prompts[1][4])
+        self.assertEqual(runner.prompts[2][1], "analysis-thread")
+        self.assertEqual(
+            self.api.messages,
+            [(123, "The independently validated analysis is complete.")],
+        )
+
+    def test_cross_validation_failure_never_returns_an_unapplied_memo_as_final(self) -> None:
         app = AgentApp(replace(self.config, admin_full_access=True), self.api)
         app.state.mark_owner_onboarding_requested()
         runner = FakeCodexRunner(
@@ -1288,7 +1341,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             )
         )
 
-        self.app._handle_update(self.update(123, "Review the completed analysis."))
+        self.app._handle_update(self.update(123, "What is the current status?"))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
@@ -1360,12 +1413,14 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
 
         self.app._handle_update(self.update(123, "이제 이거 내용대로 해서 완성본을 만들어줘"))
+        pending = self.app.store.list_tasks()[0]
+        self.assertTrue(self.app.store.approve(pending.id))
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[0][0])
+        self.assertIn("[Telegram document delivery]", self.app.runner.prompts[-1][0])
         self.assertEqual(self.api.documents, [(123, report.resolve(), self.app.config.attachment_max_bytes)])
-        self.assertEqual(self.api.messages, [(123, "Final PDF is ready.")])
+        self.assertEqual(self.api.messages[-1], (123, "Final PDF is ready."))
 
     def test_document_is_saved_inside_workspace_and_queued_without_progress(self) -> None:
         update = self.update(123, "unused")
