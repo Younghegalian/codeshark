@@ -94,6 +94,7 @@ class CodexRunner:
         self._turn_steerable = False
         self._pending_steers: list[str] = []
         self._next_rpc_id = 10
+        self._server_read_buffer = b""
 
     def _mcp_config_args(
         self,
@@ -449,6 +450,7 @@ class CodexRunner:
             self._active_turn_id = None
             self._turn_steerable = False
             self._pending_steers = []
+            self._server_read_buffer = b""
         try:
             initialized = self._server_request(
                 process,
@@ -571,6 +573,7 @@ class CodexRunner:
                 self._active_turn_id = None
                 self._turn_steerable = False
                 self._pending_steers = []
+                self._server_read_buffer = b""
         message = messages[-1] if messages else streamed_message.strip()
         return RunResult(
             exit_code=exit_code,
@@ -642,18 +645,23 @@ class CodexRunner:
     ) -> dict[str, object] | None:
         if process.stdout is None:
             raise RuntimeError("Codex app-server stdout is unavailable")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            return None
-        ready, _, _ = select.select([process.stdout], [], [], remaining)
-        if not ready:
-            return None
-        line = process.stdout.readline()
-        if not line:
-            raise RuntimeError("Codex app-server closed its protocol stream")
+        while b"\n" not in self._server_read_buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            ready, _, _ = select.select([process.stdout.fileno()], [], [], remaining)
+            if not ready:
+                return None
+            chunk = os.read(process.stdout.fileno(), 64 * 1024)
+            if not chunk:
+                raise RuntimeError("Codex app-server closed its protocol stream")
+            self._server_read_buffer += chunk
+            if len(self._server_read_buffer) > 2_000_000:
+                raise RuntimeError("Codex app-server returned an oversized protocol message")
+        raw_line, _, self._server_read_buffer = self._server_read_buffer.partition(b"\n")
         try:
-            message = json.loads(line)
-        except json.JSONDecodeError as exc:
+            message = json.loads(raw_line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RuntimeError("Codex app-server returned invalid JSON") from exc
         if not isinstance(message, dict):
             raise RuntimeError("Codex app-server returned an invalid protocol message")

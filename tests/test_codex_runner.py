@@ -1,10 +1,12 @@
 import json
 import os
 import subprocess
+import time
 from unittest.mock import Mock
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from codex_codeshark.codex_runner import CodexRunner, parse_codex_events
@@ -89,6 +91,23 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIn('"method":"turn/steer"', payload)
         self.assertIn('"expectedTurnId":"turn-1"', payload)
         self.assertIn('focus on tests', payload)
+
+    def test_app_server_reader_keeps_buffered_protocol_messages(self) -> None:
+        read_descriptor, write_descriptor = os.pipe()
+        stream = os.fdopen(read_descriptor, "r", encoding="utf-8")
+        process = SimpleNamespace(stdout=stream)
+        try:
+            os.write(write_descriptor, b'{"method":"first"}\n{"method":"second"}\n')
+            deadline = time.monotonic() + 1
+
+            first = self.runner._read_server_message(process, deadline)
+            second = self.runner._read_server_message(process, deadline)
+
+            self.assertEqual(first, {"method": "first"})
+            self.assertEqual(second, {"method": "second"})
+        finally:
+            os.close(write_descriptor)
+            stream.close()
 
     def test_child_environment_uses_strict_allowlist(self) -> None:
         with patch.dict(
