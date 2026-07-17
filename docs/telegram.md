@@ -42,6 +42,8 @@ On the first plain-text request, Codeshark asks once how it should address its o
 
 To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘`, `PDF 보내줘`, or `send the report file`). A request for a concrete final deliverable such as `완성본을 만들어줘` also attaches the matching final file in the same response when one is available. Use `/file_delivery on` to attach every new final result file automatically in this chat; it does not resend an older file for ordinary text-only tasks. The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
 
+For a manuscript or a request that explicitly asks for an independent peer review, Codeshark runs an author phase in the current project session, a separate read-only reviewer session with no author-session history, then a revision phase back in the author session. The review is internal handoff material: the final response is the revised result, not an un-applied review report. On installations that require approval for file changes, approve the task before the author phase can write the draft.
+
 ### Sessions and tasks
 
 | Command | Purpose |

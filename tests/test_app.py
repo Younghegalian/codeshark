@@ -873,10 +873,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, f"/delete_job {job_id}"))
         self.assertIsNone(self.app.store.get_schedule(job_id))
 
-        self.app.skills.add("Testing", "Test procedure")
-        skill_id = self.app.skills.list()[0].id
+        testing = self.app.skills.add("Testing", "Test procedure")
+        skill_id = testing.id
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
-        self.assertEqual(self.app.skills.list(), [])
+        remaining = self.app.skills.list()
+        self.assertEqual(len(remaining), 1)
+        self.assertIn("manuscript", remaining[0].name.lower())
 
     def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
@@ -1173,6 +1175,105 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.documents[0][1], report.resolve())
         self.assertEqual(self.api.events[0][0], "document")
         self.assertEqual(self.api.messages, [(123, "The report is complete.")])
+
+    def test_independent_peer_review_runs_author_reviewer_and_revision_sessions(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app.state.mark_owner_onboarding_requested()
+        runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Working manuscript saved to deliverables/draft.pdf",
+                thread_id="author-thread",
+                stderr="",
+            )
+        )
+        runner.results.extend(
+            [
+                RunResult(
+                    exit_code=0,
+                    message="1. Clarify the causal claim.\n2. Replace internal labels.",
+                    thread_id="reviewer-thread",
+                    stderr="",
+                ),
+                RunResult(
+                    exit_code=0,
+                    message="Revised manuscript is complete.",
+                    thread_id="author-thread",
+                    stderr="",
+                ),
+            ]
+        )
+        app.runner = runner
+
+        app._handle_update(
+            self.update(
+                123,
+                "Draft a manuscript, then use an independent peer-review session and revise it.",
+            )
+        )
+        task = app.store.claim_next_task()
+        app._execute_task(task)
+
+        self.assertEqual(len(runner.prompts), 3)
+        self.assertIn("author-review-revise loop", runner.prompts[0][0])
+        self.assertIn("author phase", runner.prompts[0][0])
+        self.assertEqual(runner.prompts[0][1], None)
+        self.assertIn("reviewer phase", runner.prompts[1][0])
+        self.assertEqual(runner.prompts[1][1], None)
+        self.assertTrue(runner.prompts[1][2])
+        self.assertFalse(runner.prompts[1][4])
+        self.assertFalse(runner.prompts[1][5])
+        self.assertIn("revision phase", runner.prompts[2][0])
+        self.assertIn("Clarify the causal claim", runner.prompts[2][0])
+        self.assertEqual(runner.prompts[2][1], "author-thread")
+        self.assertEqual(self.api.messages, [(123, "Revised manuscript is complete.")])
+
+    def test_peer_review_workflow_requires_approval_without_full_access(self) -> None:
+        self.app._handle_update(
+            self.update(
+                123,
+                "Draft a manuscript, then use an independent peer-review session and revise it.",
+            )
+        )
+
+        task = self.app.store.list_tasks()[0]
+        self.assertEqual(task.status, "awaiting_approval")
+
+    def test_peer_review_failure_never_returns_an_unapplied_review_as_final(self) -> None:
+        app = AgentApp(replace(self.config, admin_full_access=True), self.api)
+        app.state.mark_owner_onboarding_requested()
+        runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="Working manuscript saved to deliverables/draft.pdf",
+                thread_id="author-thread",
+                stderr="",
+            )
+        )
+        runner.results.append(
+            RunResult(
+                exit_code=1,
+                message="1. This review was not applied.",
+                thread_id=None,
+                stderr="reviewer failure",
+            )
+        )
+        app.runner = runner
+
+        app._handle_update(
+            self.update(
+                123,
+                "Draft a manuscript, then use an independent peer-review session and revise it.",
+            )
+        )
+        task = app.store.claim_next_task()
+        app._execute_task(task)
+
+        self.assertEqual(len(runner.prompts), 2)
+        self.assertEqual(
+            self.api.messages,
+            [(123, "Codeshark could not complete this task. Check the local logs and retry.")],
+        )
 
     def test_automatic_file_delivery_attaches_marked_result_without_a_file_request(self) -> None:
         report = self.app.config.workdir / "completed-report.pdf"
