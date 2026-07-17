@@ -1174,6 +1174,78 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.events[0][0], "document")
         self.assertEqual(self.api.messages, [(123, "The report is complete.")])
 
+    def test_automatic_file_delivery_attaches_marked_result_without_a_file_request(self) -> None:
+        report = self.app.config.workdir / "completed-report.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        self.app.state.set_automatic_file_delivery(123, True)
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"Completed. [[CODESHARK_SEND_FILE: {report}]]",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "Review the completed analysis."))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn(
+            "Automatic final-file delivery is enabled for this chat.",
+            self.app.runner.prompts[0][0],
+        )
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(self.api.messages, [(123, "Completed.")])
+
+    def test_automatic_file_delivery_falls_back_to_a_new_deliverable(self) -> None:
+        deliverables = self.app.config.workdir / "deliverables"
+        deliverables.mkdir()
+        report = deliverables / "new-report.pdf"
+
+        class NewFileRunner(FakeCodexRunner):
+            def run(self, *args, **kwargs) -> RunResult:
+                report.write_bytes(b"%PDF-1.4")
+                return super().run(*args, **kwargs)
+
+        self.app.state.set_automatic_file_delivery(123, True)
+        self.app.runner = NewFileRunner(
+            RunResult(
+                exit_code=0,
+                message="Completed analysis.",
+                thread_id="thread-new",
+                stderr="",
+            )
+        )
+
+        self.app._handle_update(self.update(123, "Analyze the data."))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(self.api.messages, [(123, "Completed analysis.")])
+
+    def test_automatic_file_delivery_does_not_resend_an_old_deliverable(self) -> None:
+        deliverables = self.app.config.workdir / "deliverables"
+        deliverables.mkdir()
+        old_report = deliverables / "old-report.pdf"
+        old_report.write_bytes(b"%PDF-1.4")
+        self.app.state.set_automatic_file_delivery(123, True)
+        self.app.runner = FakeCodexRunner()
+
+        self.app._handle_update(self.update(123, "Analyze the data."))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents, [])
+        self.assertEqual(self.api.messages, [(123, "done")])
+
+    def test_file_delivery_command_persists_the_chat_setting(self) -> None:
+        self.app._handle_update(self.update(123, "/file_delivery on"))
+
+        self.assertTrue(self.app.state.automatic_file_delivery_enabled(123))
+        self.assertIn("is on", self.api.messages[-1][1])
+
     def test_final_artifact_request_delivers_the_completed_file_in_one_response(self) -> None:
         report = self.app.config.workdir / "completed-manuscript.pdf"
         report.write_bytes(b"%PDF-1.4")

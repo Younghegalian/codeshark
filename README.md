@@ -37,7 +37,7 @@ Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a 
 | Global identity and skills | Keep Codeshark's name, owner profile, and reusable skills available across projects without mixing project facts. |
 | Scheduled follow-through | Run one-time reminders, heartbeat checks, and cron jobs in clean ephemeral sessions. |
 | File-based investigation | Accept photos and documents as task context through a size-limited private inbox. |
-| Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. |
+| Result delivery | Ask for a result file, PDF, or final deliverable, and receive an allowed workspace or project file as a Telegram document in the final response. Use `/file_delivery on` to attach new final files automatically for a chat. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
 | Isolated group analysis | Let directly addressed group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
 | Service-grade operation | Run up to three independent tasks concurrently, persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |

@@ -88,6 +88,18 @@ class StateStoreTests(unittest.TestCase):
                 1,
             )
 
+    def test_persists_automatic_file_delivery_per_chat(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+
+            self.assertFalse(store.automatic_file_delivery_enabled(123))
+            store.set_automatic_file_delivery(123, True)
+
+            restored = StateStore(path)
+            self.assertTrue(restored.automatic_file_delivery_enabled(123))
+            self.assertFalse(restored.automatic_file_delivery_enabled(456))
+
 
 if __name__ == "__main__":
     unittest.main()

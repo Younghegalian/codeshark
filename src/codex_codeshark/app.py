@@ -70,6 +70,7 @@ Plain text: submit a task or steer active private work
 /tasks: show recent persistent tasks
 /deliveries, /retry_delivery ID: inspect or retry failed replies
 /send PATH: send one requested file from a configured project root
+/file_delivery on|off: automatically attach final files created for this chat
 /groups, /disable_group CHAT_ID: manage administrator-enabled groups
 /remind MINUTES REQUEST: create a one-time job
 /cron EXPRESSION | REQUEST: create a recurring cron job
@@ -429,6 +430,8 @@ class AgentApp:
             self._send_chunks(chat_id, self._deliveries_text())
         elif command == "/send":
             self._send_requested_file(chat_id, argument)
+        elif command in {"/file-delivery", "/file_delivery"}:
+            self._set_automatic_file_delivery(chat_id, argument)
         elif command in {"/retry-delivery", "/retry_delivery"}:
             self._retry_delivery(chat_id, argument)
         elif command == "/remind":
@@ -780,6 +783,10 @@ class AgentApp:
         full_access = self.config.admin_full_access and not task.restricted
         effective_approval = task.approved or full_access
         file_delivery_requested = not task.restricted and self._file_delivery_requested(request)
+        automatic_file_delivery = (
+            not task.restricted and self.state.automatic_file_delivery_enabled(task.chat_id)
+        )
+        file_delivery_enabled = file_delivery_requested or automatic_file_delivery
         if not task.ephemeral and not task.restricted:
             self._rotate_session_if_needed(task.chat_id, project, runner)
         if task.restricted:
@@ -821,8 +828,8 @@ class AgentApp:
                 owner_onboarding_requested=self.state.owner_onboarding_requested(),
                 project_name=project,
             )
-            if file_delivery_requested:
-                prompt += self._file_delivery_prompt()
+            if file_delivery_enabled:
+                prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
             self.recall.mark_used("memory", memory_ids)
             self.recall.mark_used("skill", skill_ids)
         thread_id = (
@@ -830,7 +837,7 @@ class AgentApp:
             if task.ephemeral
             else self.state.session_snapshot(task.chat_id, project).codex_thread_id
         )
-        delivery_started_at_ns = time.time_ns() if file_delivery_requested else None
+        delivery_started_at_ns = time.time_ns() if file_delivery_enabled else None
         result = runner.run(
             prompt,
             thread_id,
@@ -846,7 +853,7 @@ class AgentApp:
         else:
             clean_message, proposed = extract_learning_candidate(result.message)
         clean_message, marked_paths = extract_file_delivery_paths(clean_message)
-        if file_delivery_requested:
+        if file_delivery_enabled:
             clean_message, linked_paths = extract_markdown_file_links(clean_message)
             _, plain_paths = extract_plain_file_paths(clean_message)
             marked_paths = tuple(
@@ -854,15 +861,21 @@ class AgentApp:
             )[:_MAX_DELIVERY_FILES]
         delivery_files: tuple[Path, ...] = ()
         unavailable_files = 0
-        if successful and file_delivery_requested:
+        if successful and file_delivery_enabled:
             delivery_files, unavailable_files = self._resolve_delivery_files(
                 marked_paths, min_modified_at_ns=None
             )
-            if not delivery_files and not marked_paths:
+            if file_delivery_requested and not delivery_files and not marked_paths:
                 fallback = self._latest_deliverable_file(delivery_started_at_ns)
                 if fallback is not None:
                     delivery_files = (fallback,)
-            if not delivery_files:
+            elif automatic_file_delivery and not delivery_files:
+                fallback = self._latest_deliverable_file(
+                    delivery_started_at_ns, require_fresh=True
+                )
+                if fallback is not None:
+                    delivery_files = (fallback,)
+            if file_delivery_requested and not delivery_files:
                 clean_message = (
                     "The task completed, but no requested file was attached. "
                     "Codeshark found no safe, readable output file to send."
@@ -1235,11 +1248,18 @@ class AgentApp:
                 roots.append(resolved)
         return tuple(roots)
 
-    def _file_delivery_prompt(self) -> str:
+    def _file_delivery_prompt(self, *, automatic: bool = False) -> str:
         roots = "\n".join(f"- {root}" for root in self._delivery_roots())
+        mode = (
+            "Automatic final-file delivery is enabled for this chat. When this task creates or "
+            "completes a user-facing result file, tag every final file. Do not tag a file when "
+            "this task does not produce a result file."
+            if automatic
+            else "The current administrator explicitly asked to receive a result file."
+        )
         return (
             "\n\n[Telegram document delivery]\n"
-            "The current administrator explicitly asked to receive a result file. You may send a "
+            f"{mode} You may send a "
             "regular result file created earlier or during this request, but only when it is directly "
             "relevant to the request. Place one final line per file "
             "in exactly this form: [[CODESHARK_SEND_FILE: /absolute/path]]. This is an internal "
@@ -1267,7 +1287,12 @@ class AgentApp:
                 files.append(document)
         return tuple(files), rejected
 
-    def _latest_deliverable_file(self, min_modified_at_ns: int | None) -> Path | None:
+    def _latest_deliverable_file(
+        self,
+        min_modified_at_ns: int | None,
+        *,
+        require_fresh: bool = False,
+    ) -> Path | None:
         deliverables = self.config.workdir / "deliverables"
         try:
             candidates = [path for path in deliverables.iterdir() if path.is_file()]
@@ -1285,7 +1310,13 @@ class AgentApp:
             resolved.append((modified_at_ns, document))
         if not resolved:
             return None
-        fresh = [item for item in resolved if min_modified_at_ns is not None and item[0] >= min_modified_at_ns]
+        fresh = [
+            item
+            for item in resolved
+            if min_modified_at_ns is not None and item[0] >= min_modified_at_ns
+        ]
+        if require_fresh and not fresh:
+            return None
         return max(fresh or resolved, key=lambda item: item[0])[1]
 
     def _resolve_delivery_file(
@@ -1332,6 +1363,21 @@ class AgentApp:
             return
         if self._send_document(chat_id, document):
             self._send_message(chat_id, f"Sent {document.name}.")
+
+    def _set_automatic_file_delivery(self, chat_id: int, argument: str) -> None:
+        enabled = argument.strip().lower()
+        if enabled not in {"on", "off"}:
+            current = "on" if self.state.automatic_file_delivery_enabled(chat_id) else "off"
+            self._send_message(chat_id, f"Usage: /file_delivery on|off (currently {current})")
+            return
+        self.state.set_automatic_file_delivery(chat_id, enabled == "on")
+        if enabled == "on":
+            self._send_message(
+                chat_id,
+                "Automatic final-file delivery is on for this chat. New result files will be attached with the final response.",
+            )
+            return
+        self._send_message(chat_id, "Automatic final-file delivery is off for this chat.")
 
     def _set_project(self, chat_id: int, argument: str) -> None:
         if not argument:

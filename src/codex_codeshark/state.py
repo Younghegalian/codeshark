@@ -26,6 +26,7 @@ class AgentState:
     chat_sessions: dict[str, SessionState] = field(default_factory=dict)
     active_projects: dict[str, str] = field(default_factory=dict)
     project_sessions: dict[str, dict[str, SessionState]] = field(default_factory=dict)
+    automatic_file_delivery: dict[str, bool] = field(default_factory=dict)
     legacy_session: SessionState | None = None
     owner_onboarding_requested: bool = False
 
@@ -60,11 +61,15 @@ class StateStore:
             legacy_session = None
         active_projects = self._active_projects(data.get("active_projects"))
         project_sessions = self._project_sessions(data.get("project_sessions"))
+        automatic_file_delivery = self._automatic_file_delivery(
+            data.get("automatic_file_delivery")
+        )
         return AgentState(
             last_update_id=data.get("last_update_id"),
             chat_sessions=chat_sessions,
             active_projects=active_projects,
             project_sessions=project_sessions,
+            automatic_file_delivery=automatic_file_delivery,
             legacy_session=legacy_session,
             owner_onboarding_requested=data.get("owner_onboarding_requested") is True,
         )
@@ -103,6 +108,16 @@ class StateStore:
         return sessions
 
     @staticmethod
+    def _automatic_file_delivery(data: object) -> dict[str, bool]:
+        if not isinstance(data, dict):
+            return {}
+        return {
+            chat_id: enabled
+            for chat_id, enabled in data.items()
+            if isinstance(chat_id, str) and isinstance(enabled, bool)
+        }
+
+    @staticmethod
     def _session_state(data: dict) -> SessionState:
         thread_id = data.get("codex_thread_id")
         turns = data.get("session_turn_count", 0)
@@ -121,6 +136,7 @@ class StateStore:
                     chat_id: dict(projects)
                     for chat_id, projects in self._state.project_sessions.items()
                 },
+                automatic_file_delivery=dict(self._state.automatic_file_delivery),
                 legacy_session=self._state.legacy_session,
                 owner_onboarding_requested=self._state.owner_onboarding_requested,
             )
@@ -166,6 +182,15 @@ class StateStore:
             self._state.active_projects[str(chat_id)] = normalized
             self._write()
         return normalized
+
+    def automatic_file_delivery_enabled(self, chat_id: int) -> bool:
+        with self._lock:
+            return self._state.automatic_file_delivery.get(str(chat_id), False)
+
+    def set_automatic_file_delivery(self, chat_id: int, enabled: bool) -> None:
+        with self._lock:
+            self._state.automatic_file_delivery[str(chat_id)] = enabled
+            self._write()
 
     def session_snapshot(self, chat_id: int, project: str | None = None) -> SessionState:
         with self._lock:
@@ -267,6 +292,7 @@ class StateStore:
                 for chat_id, session in self._state.chat_sessions.items()
             },
             "active_projects": self._state.active_projects,
+            "automatic_file_delivery": self._state.automatic_file_delivery,
             "project_sessions": {
                 chat_id: {
                     project: asdict(session)

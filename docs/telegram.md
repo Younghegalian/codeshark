@@ -40,7 +40,7 @@ Plain text queues a task in the active project's interactive Codex session. Use 
 
 On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information. To introduce the owner in groups, set a separate explicit public card; private owner context is never shared there.
 
-To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘`, `PDF 보내줘`, or `send the report file`). A request for a concrete final deliverable such as `완성본을 만들어줘` also attaches the matching final file in the same response when one is available. The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
+To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘`, `PDF 보내줘`, or `send the report file`). A request for a concrete final deliverable such as `완성본을 만들어줘` also attaches the matching final file in the same response when one is available. Use `/file_delivery on` to attach every new final result file automatically in this chat; it does not resend an older file for ordinary text-only tasks. The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
 
 ### Sessions and tasks
 
@@ -51,6 +51,7 @@ To receive a generated or existing result file, ask naturally (for example, `작
 | `/status` | Show active work, queue depth, session capacity, model, and stored item counts. |
 | `/tasks` | List recent persistent task records. |
 | `/cancel` | Cancel the active process or the oldest queued task. |
+| `/file_delivery on\|off` | Automatically attach final files newly produced for this chat, or turn that behavior off. |
 | `/project [NAME]` | Show or switch the active project. Projects start empty and default to `General`. |
 | `/new`, `/clear_temp` | Delete only the active project's temporary Codex session and start fresh; long-term memories remain. |
 | `/name NAME` | Change Codeshark's self-introduction name. This does not change the Telegram bot's display name. |
