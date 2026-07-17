@@ -40,7 +40,7 @@ Plain text queues a task in the current interactive Codex session. If a private-
 
 On the first plain-text request, Codeshark asks once how it should address its owner. That explicit preference is kept as a pinned owner profile in private administrator tasks; other durable preferences are learned only from explicit, useful interaction. Codeshark never asks to store credentials, secrets, payment data, or unnecessary sensitive information. To introduce the owner in groups, set a separate explicit public card; private owner context is never shared there.
 
-To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘`, `PDF 보내줘`, or `send the report file`). The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
+To receive a generated or existing result file, ask naturally (for example, `작업한 결과파일 보여줘`, `PDF 보내줘`, or `send the report file`). A request for a concrete final deliverable such as `완성본을 만들어줘` also attaches the matching final file in the same response when one is available. The agent may attach a regular file only from a configured workspace or project root. Use `/send PATH` when you already know the path.
 
 ### Sessions and tasks
 

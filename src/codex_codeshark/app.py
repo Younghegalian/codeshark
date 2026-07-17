@@ -110,6 +110,12 @@ _FILE_DELIVERY_REQUEST = re.compile(
     rf"(?:{_FILE_DELIVERY_NOUN}).{{0,80}}(?:{_FILE_DELIVERY_VERB})",
     flags=re.IGNORECASE,
 )
+_FINAL_ARTIFACT_REQUEST = re.compile(
+    r"(?:완성본|최종본|final[ _-]?(?:pdf|document|report|manuscript|draft)|"
+    r"(?:논문|원고|보고서).{0,80}(?:완성|작성|만들)|"
+    r"(?:완성|작성|만들).{0,80}(?:논문|원고|보고서))",
+    flags=re.IGNORECASE,
+)
 _MAX_DELIVERY_FILES = 5
 
 @dataclass(frozen=True)
@@ -1136,7 +1142,7 @@ class AgentApp:
         return not self.config.admin_full_access and self.risk_policy.requires_approval(prompt)
 
     def _file_delivery_requested(self, prompt: str) -> bool:
-        return bool(_FILE_DELIVERY_REQUEST.search(prompt))
+        return bool(_FILE_DELIVERY_REQUEST.search(prompt) or _FINAL_ARTIFACT_REQUEST.search(prompt))
 
     def _delivery_roots(self) -> tuple[Path, ...]:
         roots: list[Path] = []
