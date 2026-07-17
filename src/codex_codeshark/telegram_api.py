@@ -301,6 +301,7 @@ class TelegramAPI:
             {"command": "help", "description": "Show command help"},
             {"command": "status", "description": "Show task and session status"},
             {"command": "new", "description": "Delete the current session"},
+            {"command": "name", "description": "Set the agent name"},
             {"command": "remember", "description": "Store a long-term memory"},
             {"command": "memories", "description": "List long-term memories"},
             {"command": "forget", "description": "Delete a long-term memory"},

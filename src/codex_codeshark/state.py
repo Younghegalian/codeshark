@@ -24,6 +24,7 @@ class AgentState:
     last_update_id: int | None = None
     chat_sessions: dict[str, SessionState] = field(default_factory=dict)
     legacy_session: SessionState | None = None
+    owner_onboarding_requested: bool = False
 
 
 class StateStore:
@@ -58,6 +59,7 @@ class StateStore:
             last_update_id=data.get("last_update_id"),
             chat_sessions=chat_sessions,
             legacy_session=legacy_session,
+            owner_onboarding_requested=data.get("owner_onboarding_requested") is True,
         )
 
     @staticmethod
@@ -75,11 +77,28 @@ class StateStore:
                 last_update_id=self._state.last_update_id,
                 chat_sessions=dict(self._state.chat_sessions),
                 legacy_session=self._state.legacy_session,
+                owner_onboarding_requested=self._state.owner_onboarding_requested,
             )
 
     def set_last_update_id(self, update_id: int) -> None:
         with self._lock:
             self._state.last_update_id = update_id
+            self._write()
+
+    def owner_onboarding_requested(self) -> bool:
+        with self._lock:
+            return self._state.owner_onboarding_requested
+
+    def mark_owner_onboarding_requested(self) -> None:
+        with self._lock:
+            if self._state.owner_onboarding_requested:
+                return
+            self._state.owner_onboarding_requested = True
+            self._write()
+
+    def clear_owner_onboarding_requested(self) -> None:
+        with self._lock:
+            self._state.owner_onboarding_requested = False
             self._write()
 
     def migrate_legacy_session(self, chat_id: int) -> bool:
@@ -123,6 +142,7 @@ class StateStore:
     def _write(self) -> None:
         data = {
             "last_update_id": self._state.last_update_id,
+            "owner_onboarding_requested": self._state.owner_onboarding_requested,
             "chat_sessions": {
                 chat_id: asdict(session)
                 for chat_id, session in self._state.chat_sessions.items()

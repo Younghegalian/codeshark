@@ -7,6 +7,16 @@ from codex_codeshark.state import StateStore
 
 
 class StateStoreTests(unittest.TestCase):
+    def test_persists_owner_onboarding_request(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+            self.assertFalse(store.owner_onboarding_requested())
+            store.mark_owner_onboarding_requested()
+            self.assertTrue(StateStore(path).owner_onboarding_requested())
+            store.clear_owner_onboarding_requested()
+            self.assertFalse(StateStore(path).owner_onboarding_requested())
+
     def test_persists_offset_and_chat_scoped_sessions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"

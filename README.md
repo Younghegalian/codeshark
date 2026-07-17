@@ -4,7 +4,7 @@
   <p><strong>Your Codex agent, on call from anywhere.</strong></p>
   <p>
     Hand off repo work, investigations, and recurring checks.<br>
-    CodeShark runs on your Mac, learns how you work, and returns the finished result.
+    Codeshark runs on your Mac, learns how you work, and returns the finished result.
   </p>
   <p>
     <a href="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml"><img src="https://github.com/Younghegalian/codeshark/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>

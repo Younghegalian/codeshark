@@ -8,6 +8,7 @@ from pathlib import Path
 from codex_codeshark.app import HELP_TEXT, AgentApp
 from codex_codeshark.codex_runner import RunResult
 from codex_codeshark.config import Config
+from codex_codeshark.identity import AGENT_NAME_TITLE, OWNER_PROFILE_TITLE, owner_onboarding_message
 from codex_codeshark.telegram_api import TelegramError
 
 
@@ -89,6 +90,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.api = FakeTelegramAPI()
         self.app = AgentApp(self.config, self.api)
+        self.app.state.mark_owner_onboarding_requested()
         self.app._bot_username = "codex_codeshark_bot"
 
     def tearDown(self) -> None:
@@ -128,6 +130,39 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(self.update(123, "do work", chat_type="group"))
         self.assertEqual(self.app.store.pending_count(), 0)
         self.assertEqual(self.api.messages, [])
+
+    def test_owner_onboarding_is_prompted_once_without_blocking_the_first_task(self) -> None:
+        self.app.state.clear_owner_onboarding_requested()
+
+        self.app._handle_update(self.update(123, "do work"))
+
+        self.assertEqual(self.app.store.pending_count(), 1)
+        self.assertEqual(
+            self.api.messages,
+            [(123, owner_onboarding_message("Codeshark"))],
+        )
+        self.assertTrue(self.app.state.owner_onboarding_requested())
+
+        self.app._handle_update(self.update(123, "do more work"))
+        self.assertEqual(self.app.store.pending_count(), 2)
+        self.assertEqual(
+            self.api.messages,
+            [(123, owner_onboarding_message("Codeshark"))],
+        )
+
+    def test_administrator_can_change_agent_name(self) -> None:
+        self.app._handle_update(self.update(123, "/name Sona"))
+        name = self.app.memory.find_by_title(AGENT_NAME_TITLE)
+        self.assertIsNotNone(name)
+        self.assertEqual(name.text, "Name: Sona")
+        self.assertEqual(self.api.messages, [(123, "Agent name changed to Sona.")])
+
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+        self.app._handle_update(self.update(123, "do work"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+        self.assertIn("You are Sona", runner.prompts[0][0])
 
     def test_admin_enables_group_and_members_get_restricted_mentions_only(self) -> None:
         group_id = -100123

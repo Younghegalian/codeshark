@@ -12,6 +12,12 @@ from pathlib import Path
 from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
 from .codex_runner import CodexRunner, RunResult
 from .config import Config, configured_codex_runtime, prepare_group_runtime
+from .identity import (
+    AGENT_NAME_TITLE,
+    DEFAULT_AGENT_NAME,
+    OWNER_PROFILE_TITLE,
+    owner_onboarding_message,
+)
 from .learning import (
     LearningCandidate,
     LearningStore,
@@ -38,6 +44,7 @@ HELP_TEXT = """Codex-codeshark
 Plain text: submit a task to the current Codex session
 /status: show the active task, queue, and session
 /new: delete the current session and start fresh
+/name NAME: set Codeshark's self-introduction name
 /remember TEXT: explicitly store a long-term memory
 /memories, /forget ID: manage long-term memories
 /recall QUERY: search learned memories and skills with provenance
@@ -262,6 +269,7 @@ class AgentApp:
         if self._handle_admin_command(chat_id, command, argument):
             return
 
+        self._request_owner_onboarding(chat_id)
         self._enqueue_user_task(chat_id, text)
 
     def _handle_admin_command(self, chat_id: int, command: str, argument: str) -> bool:
@@ -271,6 +279,8 @@ class AgentApp:
             self._send_message(chat_id, self._status_text(chat_id))
         elif command == "/new":
             self._start_new_session(chat_id)
+        elif command == "/name":
+            self._set_agent_name(chat_id, argument)
         elif command == "/remember":
             self._remember(chat_id, argument)
         elif command == "/memories":
@@ -581,6 +591,7 @@ class AgentApp:
             prompt = compose_restricted_group_prompt(
                 task.prompt,
                 task_id=task.id,
+                agent_name=self._agent_name(),
                 context=context,
             )
             memory_ids: tuple[str, ...] = ()
@@ -602,6 +613,9 @@ class AgentApp:
                     else (*self.config.read_only_roots, *self.config.delegated_roots)
                 ),
                 delegated_roots=self.config.delegated_roots if effective_approval else (),
+                agent_name=self._agent_name(),
+                owner_profile=self._owner_profile(),
+                owner_onboarding_requested=self.state.owner_onboarding_requested(),
             )
             if file_delivery_requested:
                 prompt += self._file_delivery_prompt()
@@ -838,6 +852,40 @@ class AgentApp:
         else:
             self._wake_worker.set()
         return True
+
+    def _agent_name(self) -> str:
+        item = self.memory.find_by_title(AGENT_NAME_TITLE)
+        if item is None or not item.text.startswith("Name: "):
+            return DEFAULT_AGENT_NAME
+        return item.text.removeprefix("Name: ").strip() or DEFAULT_AGENT_NAME
+
+    def _owner_profile(self) -> str | None:
+        item = self.memory.find_by_title(OWNER_PROFILE_TITLE)
+        return item.text if item is not None else None
+
+    def _request_owner_onboarding(self, chat_id: int) -> None:
+        if self._owner_profile() is not None or self.state.owner_onboarding_requested():
+            return
+        self.state.mark_owner_onboarding_requested()
+        self._send_message(chat_id, owner_onboarding_message(self._agent_name()))
+
+    def _set_agent_name(self, chat_id: int, argument: str) -> None:
+        name = " ".join(argument.split())
+        if not name:
+            self._send_message(chat_id, "Usage: /name NAME")
+            return
+        if len(name) > 80 or any(ord(character) < 32 for character in name):
+            self._send_message(
+                chat_id,
+                "The agent name must be a single line of at most 80 characters.",
+            )
+            return
+        try:
+            self.memory.upsert(AGENT_NAME_TITLE, f"Name: {name}")
+        except ValueError as exc:
+            self._send_message(chat_id, f"Could not change the agent name: {exc}")
+            return
+        self._send_message(chat_id, f"Agent name changed to {name}.")
 
     def _requires_admin_approval(self, prompt: str) -> bool:
         return not self.config.admin_full_access and self.risk_policy.requires_approval(prompt)

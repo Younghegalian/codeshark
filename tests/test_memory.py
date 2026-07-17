@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from codex_codeshark.learning import SkillStore
+from codex_codeshark.identity import OWNER_PROFILE_TITLE
 from codex_codeshark.memory import (
     FeedbackStore,
     MemoryStore,
@@ -59,6 +60,7 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertEqual(updated.id, original.id)
             self.assertEqual(len(store.list()), 1)
             self.assertEqual(store.list()[0].text, "Use concise direct replies")
+            self.assertEqual(store.find_by_title("response style"), updated)
 
     def test_enforces_total_memory_capacity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -113,6 +115,22 @@ class MemoryStoreTests(unittest.TestCase):
             self.assertNotIn("a" * 20, prompt)
             self.assertEqual(memory_ids, (second.id,))
             self.assertEqual(skill_ids, ())
+
+    def test_compose_prompt_pins_owner_profile_outside_memory_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = MemoryStore(Path(directory) / "memory.json")
+            owner = store.upsert(OWNER_PROFILE_TITLE, "Call the owner Sona")
+            store.add("a" * 20)
+            prompt, memory_ids, _ = compose_prompt(
+                "Current request",
+                store.list(),
+                max_memory_chars=0,
+                owner_profile=owner.text,
+                owner_onboarding_requested=True,
+            )
+            self.assertIn("You are Codeshark", prompt)
+            self.assertIn(owner.text, prompt)
+            self.assertNotIn(owner.id, memory_ids)
 
     def test_compose_prompt_includes_only_selected_skill(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
