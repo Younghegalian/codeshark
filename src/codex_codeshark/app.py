@@ -181,6 +181,8 @@ _TASK_CLOSURE_SKILL_NAME = "Task closure and delivery"
 _TASK_CLOSURE_SKILL_CONTENT = """Start substantive work by identifying the requested outcome, acceptance evidence, expected artifacts, and direct validation. Inspect repository instructions, project manifests, tests, and CI before changing project work. Keep a concise internal handoff for every nontrivial phase. Before reporting completion, verify the final artifact exists and is readable, run relevant checks, and ensure a requested result file is tagged for delivery. Treat a failed verification or absent requested artifact as unfinished work. Convert explicit negative user feedback into a concrete regression-rule candidate with a reproducer and passing condition."""
 _ACADEMIC_FIGURE_LAYOUT_SKILL_NAME = "Academic figure layout 학술 그림 배치"
 _ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT = """Arrange existing academic figures, images, charts, panels, 그림, 이미지, 그리드, 배치, and 비율 without generating replacements or distorting source data. First inspect the target template and each asset's type, native dimensions, aspect ratio, labels, and crop constraints. Define one master grid with fixed gutters, reading order, panel labels, and caption space. Fit every asset with a uniform scale factor only: never stretch width and height independently, silently upscale a low-resolution raster, or crop data, labels, legends, scale bars, or microscopy context. Align comparable plot areas and keep captions and panel labels consistent. Render the final document or page to images at delivery size and inspect it visually for clipping, overlap, unequal spacing, warped aspect ratios, unreadable labels, low resolution, and bad page breaks. Correct defects and re-render before delivery. A supplied journal or document template overrides generic conventions; if none exists, preserve the closest existing document style and state that assumption."""
+_LOCAL_RESEARCH_TOOLS_SKILL_NAME = "Local research and design tools"
+_LOCAL_RESEARCH_TOOLS_SKILL_CONTENT = """Use the installed local tools when a task explicitly concerns Figma, FigJam, Zotero, citations, BibTeX, LaTeX, life-science research, or data visualization. For Figma, use the configured Figma MCP only in an authenticated administrator task; inspect metadata or a screenshot before changing a design, and report an unavailable or expired connection instead of claiming success. For Zotero, locate the installed zotero plugin's `zotero.py`, check its status before library work, and use its local API rather than inventing citation data. For LaTeX, locate the installed latex plugin's `latex_doctor.py`, use its bundled Tectonic runtime when available, then compile and inspect the requested artifact. For life-science research or data visualization, read only the matching installed plugin `SKILL.md` under `~/.codex/plugins/cache/openai-curated/` before using that workflow. Keep generated artifacts in the task project and send a requested final file after validating it."""
 _PROJECT_TASK_MARKER = re.compile(
     r"\A\[\[CODESHARK_PROJECT:\s*(?P<project>[^\]\r\n]{1,80})\]\]\r?\n"
 )
@@ -295,6 +297,7 @@ class AgentApp:
         self._ensure_cross_validation_skill()
         self._ensure_task_closure_skill()
         self._ensure_academic_figure_layout_skill()
+        self._ensure_local_research_tools_skill()
         self.recall = RecallStore(database_path)
         self.store = AgentStore(database_path)
         self._quarantine_legacy_automatic_learning()
@@ -358,6 +361,12 @@ class AgentApp:
         self.skills.add(
             _ACADEMIC_FIGURE_LAYOUT_SKILL_NAME,
             _ACADEMIC_FIGURE_LAYOUT_SKILL_CONTENT,
+        )
+
+    def _ensure_local_research_tools_skill(self) -> None:
+        self.skills.add(
+            _LOCAL_RESEARCH_TOOLS_SKILL_NAME,
+            _LOCAL_RESEARCH_TOOLS_SKILL_CONTENT,
         )
 
     def _roots_with_agent_repository(self, roots: tuple[Path, ...]) -> tuple[Path, ...]:

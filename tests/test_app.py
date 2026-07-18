@@ -877,7 +877,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         skill_id = testing.id
         self.app._handle_update(self.update(123, f"/forget_skill {skill_id}"))
         remaining = self.app.skills.list()
-        self.assertEqual(len(remaining), 3)
+        self.assertEqual(len(remaining), 4)
         self.assertTrue(any("cross validation" in item.name.lower() for item in remaining))
 
     def test_existing_figure_layout_request_loads_the_layout_skill(self) -> None:
@@ -892,6 +892,17 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn("Academic figure layout 학술 그림 배치", runner.prompts[0][0])
         self.assertIn("never stretch width and height independently", runner.prompts[0][0])
+
+    def test_local_research_tools_skill_loads_for_figma_task(self) -> None:
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(self.update(123, "Figma 디자인을 확인하고 정리해"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn("Local research and design tools", runner.prompts[0][0])
+        self.assertIn("configured Figma MCP", runner.prompts[0][0])
 
     def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))

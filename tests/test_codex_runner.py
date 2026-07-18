@@ -62,6 +62,24 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIn('mcp_servers.github.enabled_tools=["list_issues"]', command)
         self.assertIn("mcp_servers.docs.enabled=false", command)
 
+    def test_full_access_command_enables_explicit_figma_tools_only(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            mcp_known_servers=("figma",),
+            mcp_allowed_tools=(("figma", ("get_metadata", "get_screenshot")),),
+        )
+
+        command = runner.build_command("inspect a Figma design", None, full_access=True)
+
+        self.assertIn("mcp_servers.figma.enabled=true", command)
+        self.assertIn(
+            'mcp_servers.figma.enabled_tools=["get_metadata","get_screenshot"]',
+            command,
+        )
+
     def test_builds_force_delete_session_command(self) -> None:
         command = self.runner.build_delete_command("thread-123")
         self.assertEqual(command[-3:], ["delete", "--force", "thread-123"])
