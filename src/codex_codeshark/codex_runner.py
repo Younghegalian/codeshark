@@ -304,6 +304,11 @@ class CodexRunner:
         full_access: bool,
     ) -> list[str]:
         command = [str(self.binary), "-C", str(self.workdir)]
+        if self.model:
+            command.extend(["-c", f"model={json.dumps(self.model)}"])
+        if self.model_reasoning_effort:
+            encoded = json.dumps(self.model_reasoning_effort)
+            command.extend(["-c", f"model_reasoning_effort={encoded}"])
         if full_access:
             command.extend(self._full_access_config_args())
         elif approved:

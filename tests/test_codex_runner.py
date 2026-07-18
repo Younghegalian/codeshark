@@ -62,6 +62,21 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertIn('mcp_servers.github.enabled_tools=["list_issues"]', command)
         self.assertIn("mcp_servers.docs.enabled=false", command)
 
+    def test_app_server_command_pins_configured_model(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=60,
+            model="gpt-5.5",
+            model_reasoning_effort="high",
+        )
+
+        command = runner.build_app_server_command(approved=False, full_access=False)
+
+        self.assertIn('model="gpt-5.5"', command)
+        self.assertIn('model_reasoning_effort="high"', command)
+
     def test_full_access_command_enables_explicit_figma_tools_only(self) -> None:
         runner = CodexRunner(
             binary=Path("/tmp/codex"),
