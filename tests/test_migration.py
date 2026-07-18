@@ -93,6 +93,7 @@ class PersonalDataMigrationTests(unittest.TestCase):
             self.assertNotIn("runtime/state.json", names)
             self.assertNotIn("config.local.toml", names)
             self.assertIn("Telegram bot token", manifest["excluded"])
+            self.assertIn("workspace/.codeshark/inbox attachments", manifest["excluded"])
 
             imported = import_personal_data(archive, runtime_dir=target)
             self.assertEqual(imported.files, exported.files)

@@ -1155,8 +1155,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
 
     def test_file_request_falls_back_to_the_latest_safe_deliverable(self) -> None:
-        deliverables = self.app.config.workdir / "deliverables"
-        deliverables.mkdir()
+        deliverables = self.app.config.workdir / ".codeshark" / "deliverables"
+        deliverables.mkdir(parents=True)
         report = deliverables / "completed-report.pdf"
         report.write_bytes(b"%PDF-1.4")
         self.app.runner = FakeCodexRunner(
@@ -1422,8 +1422,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.messages, [(123, "Completed.")])
 
     def test_automatic_file_delivery_falls_back_to_a_new_deliverable(self) -> None:
-        deliverables = self.app.config.workdir / "deliverables"
-        deliverables.mkdir()
+        deliverables = self.app.config.workdir / ".codeshark" / "deliverables"
+        deliverables.mkdir(parents=True)
         report = deliverables / "new-report.pdf"
 
         class NewFileRunner(FakeCodexRunner):
@@ -1449,8 +1449,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.messages, [(123, "Completed analysis.")])
 
     def test_automatic_file_delivery_does_not_resend_an_old_deliverable(self) -> None:
-        deliverables = self.app.config.workdir / "deliverables"
-        deliverables.mkdir()
+        deliverables = self.app.config.workdir / ".codeshark" / "deliverables"
+        deliverables.mkdir(parents=True)
         old_report = deliverables / "old-report.pdf"
         old_report.write_bytes(b"%PDF-1.4")
         self.app.state.set_automatic_file_delivery(123, True)
@@ -1503,8 +1503,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._handle_update(update)
         task = self.app.store.claim_next_task()
         self.assertIn("Review this file", task.prompt)
-        self.assertRegex(task.prompt, r"inbox/[0-9a-f]{12}-report\.txt")
-        attachment = next((self.app.config.workdir / "inbox").iterdir())
+        self.assertRegex(task.prompt, r"\.codeshark/inbox/[0-9a-f]{12}-report\.txt")
+        attachment = next((self.app.config.workdir / ".codeshark" / "inbox").iterdir())
         self.assertEqual(attachment.read_bytes(), b"attachment")
         self.assertEqual(self.api.messages, [])
 
@@ -1531,7 +1531,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             "file_size": 10,
         }
         self.app._handle_update(update)
-        self.assertEqual(list((self.app.config.workdir / "inbox").iterdir()), [])
+        self.assertEqual(list((self.app.config.workdir / ".codeshark" / "inbox").iterdir()), [])
         self.assertIn("queue is full", self.api.messages[-1][1].lower())
 
     def test_failed_reply_is_persisted_for_explicit_retry(self) -> None:

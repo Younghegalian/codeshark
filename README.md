@@ -272,7 +272,7 @@ Codex-codeshark/
 ├── scripts/                 # macOS service helpers
 ├── src/codex_codeshark/     # Queue, runtime, policy, memory, and migration
 ├── tests/                   # Offline standard-library unit tests
-├── workspace/               # Private agent workspace and inbox
+├── workspace/               # Private agent workspace; .codeshark/ holds managed attachments
 ├── config.example.toml      # Public configuration schema
 ├── config.local.toml        # Private installation config, gitignored
 └── runtime/                 # Private state, database, skills, and logs

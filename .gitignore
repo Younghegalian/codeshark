@@ -10,4 +10,3 @@ config.local.toml
 runtime/*
 !runtime/.gitkeep
 workspace/*
-!workspace/README.md

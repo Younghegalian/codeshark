@@ -181,7 +181,7 @@ def export_personal_data(
                 "enabled Telegram group IDs",
                 "Telegram group participant context",
                 "Telegram group reply-chain state",
-                "workspace/inbox attachments",
+                "workspace/.codeshark/inbox attachments",
             ],
         }
         descriptor, temporary_name = tempfile.mkstemp(
