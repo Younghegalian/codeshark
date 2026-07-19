@@ -59,6 +59,7 @@ class ServiceTests(unittest.TestCase):
             self.assertEqual(payload["Umask"], 0o077)
             self.assertEqual(menu_payload["Label"], "com.codeshark.status")
             self.assertEqual(menu_payload["ProgramArguments"][1], str(root))
+            self.assertTrue(menu_payload["ProgramArguments"][2].endswith("codeshark-menubar-template.png"))
             commands = [call.args[0] for call in run_mock.call_args_list]
             self.assertTrue(any("bootstrap" in command for command in commands))
             self.assertTrue(any("kickstart" in command for command in commands))

@@ -176,9 +176,10 @@ def _payload(
     }
 
 
-def _build_menu_bar_agent(installed_source: Path) -> Path:
+def _build_menu_bar_agent(installed_source: Path) -> tuple[Path, Path]:
     source = installed_source / "codex_codeshark" / "menu_bar.swift"
-    if not source.is_file():
+    icon = installed_source / "codex_codeshark" / "codeshark-menubar-template.png"
+    if not source.is_file() or not icon.is_file():
         raise ServiceError("Codeshark menu bar source is missing from the service package")
     executable = installed_source.parent / "CodesharkMenu"
     result = subprocess.run(
@@ -192,14 +193,14 @@ def _build_menu_bar_agent(installed_source: Path) -> Path:
         raise ServiceError(f"could not build the Codeshark menu bar icon: {detail}")
     if executable.is_file():
         executable.chmod(0o700)
-    return executable
+    return executable, icon
 
 
-def _menu_payload(project_root: Path, executable: Path) -> dict:
+def _menu_payload(project_root: Path, executable: Path, icon: Path) -> dict:
     runtime = project_root / "runtime"
     return {
         "Label": MENU_LABEL,
-        "ProgramArguments": [str(executable), str(project_root)],
+        "ProgramArguments": [str(executable), str(project_root), str(icon)],
         "WorkingDirectory": str(executable.parent),
         "Umask": 0o077,
         "RunAtLoad": True,
@@ -229,7 +230,7 @@ def install_service(
         config_path=config_path,
         install_root=install_root,
     )
-    menu_executable = _build_menu_bar_agent(installed_source)
+    menu_executable, menu_icon = _build_menu_bar_agent(installed_source)
     menu_plist_path = _menu_plist_path(plist_path)
     atomic_write_bytes(
         plist_path,
@@ -240,7 +241,7 @@ def install_service(
     )
     atomic_write_bytes(
         menu_plist_path,
-        plistlib.dumps(_menu_payload(project_root, menu_executable), sort_keys=False),
+        plistlib.dumps(_menu_payload(project_root, menu_executable, menu_icon), sort_keys=False),
     )
 
     subprocess.run(
