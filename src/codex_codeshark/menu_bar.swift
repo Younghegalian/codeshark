@@ -614,15 +614,18 @@ struct ModelUsageView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Model Usage")
                     .font(.headline)
-                Text("Live account quota + exact tokens reported per Codex turn.")
+                Text("Shared account quota + Codeshark-only turn telemetry.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
             if let accountUsage = model.snapshot.accountUsage {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("Codex account quota")
+                    Text("Codex account quota (all sessions)")
                         .font(.subheadline.weight(.semibold))
+                    Text("Includes separate Codex work on this ChatGPT account.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                     ForEach(accountUsage.buckets) { bucket in
                         if let window = bucket.primary {
                             VStack(alignment: .leading, spacing: 3) {
@@ -645,7 +648,7 @@ struct ModelUsageView: View {
                 .padding(10)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
             } else {
-                Text("Live account quota will appear after the first completed Codex turn.")
+                Text("Live account quota is loading or temporarily unavailable.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -655,6 +658,9 @@ struct ModelUsageView: View {
                 Text("Last 7 days").tag(1)
             }
             .pickerStyle(.segmented)
+
+            Text("Codeshark-only model telemetry")
+                .font(.subheadline.weight(.semibold))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 11) {
@@ -694,7 +700,7 @@ struct ModelUsageView: View {
             Divider()
 
             HStack {
-                Text("Account quota is aggregate; Codex does not expose per-model quota debits.")
+                Text("Account quota is shared; Codex does not expose per-model quota debits.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()
@@ -1160,7 +1166,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 790, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 390),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -1173,14 +1179,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Orchestration")
         title.font = .systemFont(ofSize: 17, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 407, width: 750, height: 24)
+        title.frame = NSRect(x: 20, y: 337, width: 720, height: 24)
         content.addSubview(title)
         let detail = NSTextField(
-            wrappingLabelWithString: "Quick responds in one pass; Routine executes with scoped checks. Independent review begins at Standard. Choose supporting roles; feedback and finalization require independent review. Applying restarts Codeshark."
+            wrappingLabelWithString: "Quick: one pass. Routine: scoped checks. Review begins at Standard; feedback and finalization require it."
         )
-        detail.font = .systemFont(ofSize: 13)
+        detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 367, width: 750, height: 34)
+        detail.frame = NSRect(x: 20, y: 303, width: 720, height: 18)
         content.addSubview(detail)
 
         for (title, x, width) in [
@@ -1193,7 +1199,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             let header = NSTextField(labelWithString: title)
             header.font = .systemFont(ofSize: 11, weight: .semibold)
             header.textColor = .secondaryLabelColor
-            header.frame = NSRect(x: CGFloat(x), y: 338, width: CGFloat(width), height: 16)
+            header.frame = NSRect(x: CGFloat(x), y: 274, width: CGFloat(width), height: 16)
             content.addSubview(header)
         }
 
@@ -1210,7 +1216,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         orchestrationFeedback = [:]
         orchestrationFinalization = [:]
         for (index, tier) in tiers.enumerated() {
-            let y = 278 - (index * 48)
+            let y = 224 - (index * 38)
             let values = orchestrationValues(for: tier.0)
             let label = NSTextField(labelWithString: tier.1)
             label.font = .systemFont(ofSize: 14, weight: .medium)
@@ -1235,7 +1241,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             orchestrationFinalization[tier.0] = finalization
         }
 
-        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 750, height: 1))
+        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 720, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
         let close = NSButton(title: "Close", target: self, action: #selector(closeOrchestration))
@@ -1245,7 +1251,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyOrchestration))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 680, y: 15, width: 90, height: 28)
+        apply.frame = NSRect(x: 650, y: 15, width: 90, height: 28)
         content.addSubview(apply)
         panel.contentView = content
         panel.center()

@@ -426,6 +426,7 @@ class AgentApp:
         self.runner = self._worker_runners[0]
         self._status_lock = threading.Lock()
         self._account_usage_lock = threading.Lock()
+        self._account_usage_refresh_lock = threading.Lock()
         self._account_usage: AccountUsageSnapshot | None = None
         self._account_usage_error_at = 0.0
         self._active_tasks: dict[str, ActiveTask] = {}
@@ -495,6 +496,16 @@ class AgentApp:
                 for bucket in snapshot.buckets
             ],
         }
+
+    def _refresh_account_usage_for_menu(self) -> None:
+        """Refresh shared Codex quota without delaying Telegram polling."""
+        if not self._account_usage_refresh_lock.acquire(blocking=False):
+            return
+        try:
+            self._refresh_account_usage()
+            self._write_menu_status(0)
+        finally:
+            self._account_usage_refresh_lock.release()
 
     def _write_menu_status(self, active_task_count: int) -> None:
         """Publish only non-sensitive activity for the local menu bar companion."""
@@ -838,7 +849,16 @@ class AgentApp:
                 daemon=True,
             ).start()
 
+        next_usage_refresh = 0.0
         while True:
+            now = time.monotonic()
+            if now >= next_usage_refresh:
+                threading.Thread(
+                    target=self._refresh_account_usage_for_menu,
+                    name="codex-account-usage",
+                    daemon=True,
+                ).start()
+                next_usage_refresh = now + 60
             snapshot = self.state.snapshot()
             offset = snapshot.last_update_id + 1 if snapshot.last_update_id is not None else None
             try:
