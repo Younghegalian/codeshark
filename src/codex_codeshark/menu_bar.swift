@@ -424,7 +424,7 @@ struct DashboardView: View {
             Divider()
 
             HStack(spacing: 8) {
-                Button("Workspace…", action: chooseWorkspace)
+                Button("Set Workspace…", action: chooseWorkspace)
                     .buttonStyle(.bordered)
                 Button("Logs", action: showLogs)
                     .buttonStyle(.bordered)
@@ -440,13 +440,15 @@ struct DashboardView: View {
     }
 }
 
-final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
+final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let projectRoot: String
     private let iconPath: String
     private let statusItem = NSStatusBar.system.statusItem(withLength: 32)
     private let popover = NSPopover()
     private let dashboard: DashboardModel
     private var logPanel: NSPanel?
+    private var modelRoutingPanel: NSPanel?
+    private var modelPickers: [String: NSPopUpButton] = [:]
 
     init(projectRoot: String, iconPath: String) {
         self.projectRoot = projectRoot
@@ -511,16 +513,16 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         chooser.canChooseFiles = false
         chooser.canChooseDirectories = true
         chooser.allowsMultipleSelection = false
-        chooser.message = "Choose the folder Codeshark should use for new work."
+        chooser.message = "Choose Codeshark's working directory for new work."
         if !dashboard.snapshot.workspacePath.isEmpty {
             chooser.directoryURL = URL(fileURLWithPath: dashboard.snapshot.workspacePath)
         }
         guard chooser.runModal() == .OK, let directory = chooser.url else { return }
 
         let confirmation = NSAlert()
-        confirmation.messageText = "Use this workspace?"
+        confirmation.messageText = "Set Codeshark workspace?"
         confirmation.informativeText = workspaceDisplayPath(directory.path)
-            + "\n\nCodeshark will restart to apply the change. Active work is safely returned to the queue."
+            + "\n\nThis changes Codeshark's working directory for new tasks. Codeshark will restart to apply it; active work is safely returned to the queue."
         confirmation.addButton(withTitle: "Set Workspace")
         confirmation.addButton(withTitle: "Cancel")
         guard confirmation.runModal() == .alertFirstButtonReturn else { return }
@@ -530,39 +532,80 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
 
     private func configureModels() {
         dashboard.refresh()
-        let alert = NSAlert()
-        alert.messageText = "Model Routing"
-        alert.informativeText = "Choose the model assigned to each role. Codeshark restarts to apply the changes."
-        alert.addButton(withTitle: "Apply")
-        alert.addButton(withTitle: "Cancel")
+        if let panel = modelRoutingPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
 
-        let routine = modelPicker(currentModel(for: "Routine", fallback: "gpt-5.6-luna"))
-        let preflight = modelPicker(currentModel(for: "Preflight", fallback: "gpt-5.6-luna"))
-        let primary = modelPicker(currentModel(for: "Primary · Rework", fallback: "gpt-5.6-sol"))
-        let validator = modelPicker(currentModel(for: "Validation · Feedback", fallback: "gpt-5.6-terra"))
-        let form = NSStackView(views: [
-            modelRow("Routine", picker: routine),
-            modelRow("Preflight", picker: preflight),
-            modelRow("Primary / Rework", picker: primary),
-            modelRow("Validation / Feedback", picker: validator),
-        ])
-        form.orientation = .vertical
-        form.spacing = 8
-        form.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 0, right: 0)
-        alert.accessoryView = form
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 320),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Model Routing"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
 
-        runServiceCommand([
-            "set-models",
-            "--routine", routine.titleOfSelectedItem ?? "gpt-5.6-luna",
-            "--preflight", preflight.titleOfSelectedItem ?? "gpt-5.6-luna",
-            "--primary", primary.titleOfSelectedItem ?? "gpt-5.6-sol",
-            "--validator", validator.titleOfSelectedItem ?? "gpt-5.6-terra",
-        ])
+        let content = NSView(frame: panel.contentView?.bounds ?? .zero)
+        let title = NSTextField(labelWithString: "Model Routing")
+        title.font = .systemFont(ofSize: 17, weight: .semibold)
+        title.frame = NSRect(x: 20, y: 267, width: 390, height: 24)
+        content.addSubview(title)
+
+        let detail = NSTextField(wrappingLabelWithString: "Choose the model assigned to each role. Applying restarts Codeshark.")
+        detail.font = .systemFont(ofSize: 13)
+        detail.textColor = .secondaryLabelColor
+        detail.frame = NSRect(x: 20, y: 228, width: 390, height: 34)
+        content.addSubview(detail)
+
+        let roles = [
+            ("Routine", "Routine", "gpt-5.6-luna"),
+            ("Preflight", "Preflight", "gpt-5.6-luna"),
+            ("Primary / Rework", "Primary · Rework", "gpt-5.6-sol"),
+            ("Validation / Feedback", "Validation · Feedback", "gpt-5.6-terra"),
+        ]
+        modelPickers = [:]
+        for (index, role) in roles.enumerated() {
+            let y = 190 - (index * 36)
+            let label = NSTextField(labelWithString: role.0)
+            label.font = .systemFont(ofSize: 13, weight: .medium)
+            label.frame = NSRect(x: 20, y: y + 4, width: 170, height: 20)
+            content.addSubview(label)
+
+            let current = dashboard.snapshot.modelAssignments
+                .first(where: { $0.role == role.1 })?.model ?? role.2
+            let picker = modelPicker(current, frame: NSRect(x: 195, y: y, width: 215, height: 28))
+            content.addSubview(picker)
+            modelPickers[role.1] = picker
+        }
+
+        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 390, height: 1))
+        separator.boxType = .separator
+        content.addSubview(separator)
+
+        let close = NSButton(title: "Close", target: self, action: #selector(closeModelRouting))
+        close.bezelStyle = .rounded
+        close.frame = NSRect(x: 20, y: 15, width: 90, height: 28)
+        content.addSubview(close)
+
+        let apply = NSButton(title: "Apply", target: self, action: #selector(applyModelRouting))
+        apply.bezelStyle = .rounded
+        apply.keyEquivalent = "\r"
+        apply.frame = NSRect(x: 320, y: 15, width: 90, height: 28)
+        content.addSubview(apply)
+
+        panel.contentView = content
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        modelRoutingPanel = panel
     }
 
-    private func modelPicker(_ current: String) -> NSPopUpButton {
-        let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 165, height: 26), pullsDown: false)
+    private func modelPicker(_ current: String, frame: NSRect) -> NSPopUpButton {
+        let picker = NSPopUpButton(frame: frame, pullsDown: false)
         var models = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
         if !models.contains(current) {
             models.insert(current, at: 0)
@@ -572,18 +615,27 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         return picker
     }
 
-    private func modelRow(_ title: String, picker: NSPopUpButton) -> NSStackView {
-        let label = NSTextField(labelWithString: title)
-        label.frame = NSRect(x: 0, y: 0, width: 130, height: 20)
-        label.setContentHuggingPriority(.required, for: .horizontal)
-        let row = NSStackView(views: [label, picker])
-        row.orientation = .horizontal
-        row.spacing = 10
-        return row
+    @objc private func closeModelRouting() {
+        modelRoutingPanel?.orderOut(nil)
     }
 
-    private func currentModel(for role: String, fallback: String) -> String {
-        dashboard.snapshot.modelAssignments.first(where: { $0.role == role })?.model ?? fallback
+    @objc private func applyModelRouting() {
+        guard let routine = modelPickers["Routine"]?.titleOfSelectedItem,
+              let preflight = modelPickers["Preflight"]?.titleOfSelectedItem,
+              let primary = modelPickers["Primary · Rework"]?.titleOfSelectedItem,
+              let validator = modelPickers["Validation · Feedback"]?.titleOfSelectedItem
+        else {
+            showError("Could not read the selected model routing.")
+            return
+        }
+        modelRoutingPanel?.orderOut(nil)
+        runServiceCommand([
+            "set-models",
+            "--routine", routine,
+            "--preflight", preflight,
+            "--primary", primary,
+            "--validator", validator,
+        ])
     }
 
     private func showLogs() {
@@ -602,6 +654,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         panel.title = "Codeshark Execution Log"
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        panel.delegate = self
         panel.contentViewController = NSHostingController(
             rootView: ExecutionLogView(
                 model: dashboard,
@@ -613,6 +666,16 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         logPanel = panel
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        if window == modelRoutingPanel {
+            modelRoutingPanel = nil
+            modelPickers = [:]
+        } else if window == logPanel {
+            logPanel = nil
+        }
     }
 
     private func revealLogFolder() {
