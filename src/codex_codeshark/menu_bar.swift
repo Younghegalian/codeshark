@@ -164,7 +164,7 @@ struct DashboardView: View {
     private var snapshot: DashboardSnapshot { model.snapshot }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "terminal.fill")
                     .font(.system(size: 20, weight: .semibold))
@@ -195,88 +195,92 @@ struct DashboardView: View {
 
             Divider()
 
-            if snapshot.activeTasks.isEmpty {
-                Label("Ready for a request", systemImage: "checkmark.circle")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("CURRENT WORK")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(snapshot.activeTasks) { task in
-                        VStack(alignment: .leading, spacing: 4) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if snapshot.activeTasks.isEmpty {
+                        Label("Ready for a request", systemImage: "checkmark.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("CURRENT WORK")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(snapshot.activeTasks) { task in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Text(task.phase)
+                                            .font(.subheadline.weight(.semibold))
+                                        Spacer()
+                                        Text(elapsedText(task.elapsedSeconds))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("\(task.project) · \(task.model) · \(task.reasoningEffort)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(10)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+
+                    if !snapshot.modelUsage.isEmpty {
+                        VStack(alignment: .leading, spacing: 7) {
                             HStack {
-                                Text(task.phase)
-                                    .font(.subheadline.weight(.semibold))
+                                Text("MODEL ACTIVITY")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
                                 Spacer()
-                                Text(elapsedText(task.elapsedSeconds))
+                                Text("last 5h")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            ForEach(snapshot.modelUsage.prefix(3)) { usage in
+                                HStack(spacing: 6) {
+                                    Text(usage.model.replacingOccurrences(of: "gpt-5.6-", with: ""))
+                                        .font(.caption.weight(.medium))
+                                    Text(usage.phase)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text("\(usage.completed)/\(usage.runs) · \(Int(usage.elapsedSeconds / 60))m")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+
+                    if !snapshot.recentArtifacts.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("RECENT DELIVERY")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            ForEach(snapshot.recentArtifacts, id: \.self) { artifact in
+                                Label(artifact, systemImage: "doc")
                                     .font(.caption)
+                                    .lineLimit(1)
                                     .foregroundStyle(.secondary)
                             }
-                            Text("\(task.project) · \(task.model) · \(task.reasoningEffort)")
+                        }
+                    }
+
+                    if let failure = snapshot.lastFailure {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label("Last task needs attention", systemImage: "exclamationmark.triangle")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.orange)
+                            Text(failure.message)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(2)
                         }
                         .padding(10)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
                     }
                 }
-            }
-
-            if !snapshot.modelUsage.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack {
-                        Text("MODEL ACTIVITY")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Text("last 5h")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                    ForEach(snapshot.modelUsage.prefix(3)) { usage in
-                        HStack(spacing: 6) {
-                            Text(usage.model.replacingOccurrences(of: "gpt-5.6-", with: ""))
-                                .font(.caption.weight(.medium))
-                            Text(usage.phase)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text("\(usage.completed)/\(usage.runs) · \(Int(usage.elapsedSeconds / 60))m")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            }
-
-            if !snapshot.recentArtifacts.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("RECENT DELIVERY")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    ForEach(snapshot.recentArtifacts, id: \.self) { artifact in
-                        Label(artifact, systemImage: "doc")
-                            .font(.caption)
-                            .lineLimit(1)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            if let failure = snapshot.lastFailure {
-                VStack(alignment: .leading, spacing: 5) {
-                    Label("Last task needs attention", systemImage: "exclamationmark.triangle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                    Text(failure.message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .padding(10)
-                .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
             }
 
             Divider()
@@ -292,7 +296,7 @@ struct DashboardView: View {
             }
         }
         .padding(14)
-        .frame(width: 390)
+        .frame(width: 340, height: 360)
     }
 }
 
@@ -312,6 +316,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         popover.behavior = .transient
+        popover.contentSize = NSSize(width: 340, height: 360)
         popover.contentViewController = NSHostingController(
             rootView: DashboardView(
                 model: dashboard,
