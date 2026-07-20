@@ -772,8 +772,10 @@ private struct LocalConsoleView: View {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
-                .scaledToFill()
+                .scaledToFit()
                 .frame(width: size, height: size)
+                .padding(2)
+                .background(.white, in: Circle())
                 .clipShape(Circle())
         } else {
             Image(systemName: "terminal.fill")
@@ -893,7 +895,7 @@ private struct LocalConsoleView: View {
             canvas.ignoresSafeArea()
             VStack(spacing: 12) {
                 HStack(spacing: 11) {
-                    mascot(size: 42)
+                    mascot(size: 38)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Codeshark").font(.title3.weight(.semibold)).foregroundStyle(.white)
                         HStack(spacing: 5) {
@@ -915,22 +917,30 @@ private struct LocalConsoleView: View {
                     }
                     .menuStyle(.borderlessButton)
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 8)
-                .background(chrome.opacity(0.86), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(chrome.opacity(0.86), in: RoundedRectangle(cornerRadius: 21, style: .continuous))
 
                 Rectangle().fill(.white.opacity(0.10)).frame(height: 1)
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if model.messages.isEmpty {
-                            VStack(spacing: 14) {
-                                mascot(size: 62)
-                                Text("Start a direct Codeshark task").font(.headline).foregroundStyle(.white)
-                                Text("The same local workspace, models, attachments, and delivered files — without Telegram.")
-                                    .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(muted).frame(maxWidth: 380)
+                            HStack(alignment: .top, spacing: 10) {
+                                mascot(size: 40)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("Codeshark").font(.caption.weight(.semibold)).foregroundStyle(accent)
+                                    Text("Start a direct task here. Files and results stay in your local workspace.")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 6)
                             }
-                            .frame(maxWidth: .infinity, minHeight: 290)
+                            .padding(12)
+                            .frame(maxWidth: 500, alignment: .leading)
+                            .background(incoming, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(.top, 8)
                         } else {
                             ForEach(model.messages) { message in
                                 if message.role == "system" {
@@ -947,7 +957,7 @@ private struct LocalConsoleView: View {
                     }
                     .padding(.horizontal, 8).padding(.vertical, 4)
                 }
-                .frame(minHeight: 310)
+                .frame(minHeight: 160, maxHeight: 360)
 
                 ZStack(alignment: .bottomLeading) {
                     if model.commandPaletteOpen {
@@ -992,23 +1002,13 @@ private struct LocalConsoleView: View {
                         .foregroundStyle(.white)
                         .background(chrome, in: Circle())
                         .overlay(Circle().stroke(.white.opacity(0.15), lineWidth: 1))
-                        ZStack(alignment: .topLeading) {
-                            if model.draft.isEmpty {
-                                Text("Write a message…")
-                                    .font(.body)
-                                    .foregroundStyle(muted)
-                                    .padding(.horizontal, 13)
-                                    .padding(.vertical, 12)
-                                    .allowsHitTesting(false)
-                            }
-                            TextEditor(text: $model.draft)
-                                .font(.body)
-                                .foregroundStyle(.white)
-                                .scrollContentBackground(.hidden)
-                                .frame(minHeight: 43, maxHeight: 84)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                        }
+                        TextField("Write a message…", text: $model.draft, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.body)
+                            .foregroundStyle(.white)
+                            .lineLimit(1...2)
+                            .frame(minHeight: 42, maxHeight: 58)
+                            .padding(.horizontal, 13)
                         .background(composer, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.14), lineWidth: 1))
                         Button { model.send() } label: {
@@ -1024,14 +1024,14 @@ private struct LocalConsoleView: View {
                         Text(model.status).font(.caption).foregroundStyle(muted)
                     }
                 }
-                .padding(10)
-                .background(chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
+                .padding(8)
+                .background(chrome.opacity(0.98), in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.12), lineWidth: 1))
                 }
             }
         }
-        .padding(16)
-        .frame(minWidth: 700, minHeight: 650, alignment: .topLeading)
+        .padding(12)
+        .frame(minWidth: 620, minHeight: 560, alignment: .topLeading)
     }
 }
 
@@ -2454,13 +2454,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             self?.executeServiceCommand(arguments) ?? (status: 1, output: "Codeshark is unavailable.")
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 680, height: 620),
             styleMask: [.titled, .closable, .utilityWindow, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Codeshark"
-        panel.minSize = NSSize(width: 700, height: 650)
+        panel.minSize = NSSize(width: 620, height: 560)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.delegate = self
@@ -2468,7 +2468,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             rootView: LocalConsoleView(
                 model: model,
                 dashboard: dashboard,
-                mascotPath: iconPath,
+                mascotPath: fullColorMascotPath(),
                 chooseFiles: { [weak self] in self?.chooseLocalFiles() },
                 revealArtifacts: { [weak self] paths in self?.revealArtifacts(paths) },
                 revealWorkspace: { [weak self] in self?.revealWorkspace() }
@@ -2479,6 +2479,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         panel.center()
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func fullColorMascotPath() -> String {
+        let mascot = URL(fileURLWithPath: projectRoot)
+            .appendingPathComponent("assets/codeshark-mascot.png").path
+        return FileManager.default.fileExists(atPath: mascot) ? mascot : iconPath
     }
 
     private func chooseLocalFiles() {
