@@ -25,6 +25,29 @@ from codex_codeshark.config import (
 
 
 class ConfigTests(unittest.TestCase):
+    def test_accepts_disabled_task_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                        "task_timeout_seconds = 0",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(load_config(config_path).task_timeout_seconds, 0)
+
     def test_sets_workspace_directory_without_rewriting_other_settings(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

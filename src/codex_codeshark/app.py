@@ -1773,6 +1773,13 @@ class AgentApp:
         task_id: str,
     ) -> None:
         snapshot = self.state.session_snapshot(chat_id, project)
+        if self.state.session_interrupted(chat_id, project):
+            LOGGER.info(
+                "preserving interrupted session for chat_id=%s project=%s",
+                chat_id,
+                project,
+            )
+            return None
         if not snapshot.codex_thread_id or snapshot.session_turn_count < self.config.max_session_turns:
             return None
         summary_prompt = (
@@ -1904,7 +1911,11 @@ class AgentApp:
         task_id: str | None = None,
     ) -> None:
         if persist_session and result.thread_id:
-            self.state.record_session_turn(chat_id, result.thread_id, project)
+            if result.timed_out:
+                self.state.set_session_thread_id(chat_id, result.thread_id, project)
+                self.state.mark_session_interrupted(chat_id, project)
+            else:
+                self.state.record_session_turn(chat_id, result.thread_id, project)
         if result.cancelled:
             self._send_message(
                 chat_id,

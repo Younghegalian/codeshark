@@ -48,12 +48,13 @@ high_assurance_uses_validator = true
 high_assurance_feedback_iterations = 2
 high_assurance_uses_finalizer = true
 poll_timeout_seconds = 30
-task_timeout_seconds = 1800
+# 0 disables the per-phase task timeout. `/cancel` remains available.
+task_timeout_seconds = 0
 queue_size = 20
 # Choose the local task concurrency that matches this Mac. Persistent sessions in
 # the same chat remain serialized so their conversational context cannot race.
 worker_count = 8
-max_session_turns = 30
+max_session_turns = 120
 memory_max_chars = 12000
 codex_network_access = false
 # Set true only for a paired administrator who intentionally wants unrestricted

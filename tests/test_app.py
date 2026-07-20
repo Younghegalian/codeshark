@@ -931,6 +931,31 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(runner.deleted_sessions, [])
         self.assertIsNone(self.app.state.session_snapshot(123).codex_thread_id)
 
+    def test_timeout_preserves_a_full_session_for_continuation(self) -> None:
+        runner = FakeCodexRunner()
+        self.app.state.set_session_thread_id(123, "thread-1", "General")
+        for _ in range(self.config.max_session_turns):
+            self.app.state.record_session_turn(123, "thread-1", "General")
+        timed_out = RunResult(
+            exit_code=1,
+            message="",
+            thread_id="thread-1",
+            stderr="timed out",
+            timed_out=True,
+        )
+
+        self.app._deliver_result(
+            123,
+            timed_out,
+            persist_session=True,
+            restricted=False,
+            project="General",
+        )
+        self.assertTrue(self.app.state.session_interrupted(123, "General"))
+        self.app._rotate_session_if_needed(123, "General", runner, "task-1")
+
+        self.assertEqual(runner.deleted_sessions, [])
+
     def test_feedback_requires_a_successful_completed_task(self) -> None:
         self.app._handle_update(self.update(123, "/good"))
         self.assertIn("no completed task", self.api.messages[-1][1].lower())

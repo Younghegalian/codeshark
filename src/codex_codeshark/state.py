@@ -27,6 +27,7 @@ class AgentState:
     active_projects: dict[str, str] = field(default_factory=dict)
     project_sessions: dict[str, dict[str, SessionState]] = field(default_factory=dict)
     automatic_file_delivery: dict[str, bool] = field(default_factory=dict)
+    interrupted_projects: dict[str, set[str]] = field(default_factory=dict)
     legacy_session: SessionState | None = None
     owner_onboarding_requested: bool = False
 
@@ -64,12 +65,14 @@ class StateStore:
         automatic_file_delivery = self._automatic_file_delivery(
             data.get("automatic_file_delivery")
         )
+        interrupted_projects = self._interrupted_projects(data.get("interrupted_projects"))
         return AgentState(
             last_update_id=data.get("last_update_id"),
             chat_sessions=chat_sessions,
             active_projects=active_projects,
             project_sessions=project_sessions,
             automatic_file_delivery=automatic_file_delivery,
+            interrupted_projects=interrupted_projects,
             legacy_session=legacy_session,
             owner_onboarding_requested=data.get("owner_onboarding_requested") is True,
         )
@@ -118,6 +121,26 @@ class StateStore:
         }
 
     @staticmethod
+    def _interrupted_projects(data: object) -> dict[str, set[str]]:
+        if not isinstance(data, dict):
+            return {}
+        interrupted: dict[str, set[str]] = {}
+        for chat_id, projects in data.items():
+            if not isinstance(chat_id, str) or not isinstance(projects, list):
+                continue
+            parsed: set[str] = set()
+            for project in projects:
+                if not isinstance(project, str):
+                    continue
+                try:
+                    parsed.add(normalize_project_name(project))
+                except ValueError:
+                    continue
+            if parsed:
+                interrupted[chat_id] = parsed
+        return interrupted
+
+    @staticmethod
     def _session_state(data: dict) -> SessionState:
         thread_id = data.get("codex_thread_id")
         turns = data.get("session_turn_count", 0)
@@ -137,6 +160,10 @@ class StateStore:
                     for chat_id, projects in self._state.project_sessions.items()
                 },
                 automatic_file_delivery=dict(self._state.automatic_file_delivery),
+                interrupted_projects={
+                    chat_id: set(projects)
+                    for chat_id, projects in self._state.interrupted_projects.items()
+                },
                 legacy_session=self._state.legacy_session,
                 owner_onboarding_requested=self._state.owner_onboarding_requested,
             )
@@ -190,6 +217,28 @@ class StateStore:
     def set_automatic_file_delivery(self, chat_id: int, enabled: bool) -> None:
         with self._lock:
             self._state.automatic_file_delivery[str(chat_id)] = enabled
+            self._write()
+
+    def session_interrupted(self, chat_id: int, project: str) -> bool:
+        normalized = normalize_project_name(project)
+        with self._lock:
+            return normalized in self._state.interrupted_projects.get(str(chat_id), set())
+
+    def mark_session_interrupted(self, chat_id: int, project: str) -> None:
+        normalized = normalize_project_name(project)
+        with self._lock:
+            self._state.interrupted_projects.setdefault(str(chat_id), set()).add(normalized)
+            self._write()
+
+    def clear_session_interrupted(self, chat_id: int, project: str) -> None:
+        normalized = normalize_project_name(project)
+        with self._lock:
+            projects = self._state.interrupted_projects.get(str(chat_id))
+            if projects is None or normalized not in projects:
+                return
+            projects.discard(normalized)
+            if not projects:
+                self._state.interrupted_projects.pop(str(chat_id), None)
             self._write()
 
     def session_snapshot(self, chat_id: int, project: str | None = None) -> SessionState:
@@ -273,6 +322,7 @@ class StateStore:
                 sessions[normalized] = session
                 if normalized == DEFAULT_PROJECT:
                     self._state.chat_sessions[key] = session
+                self._clear_interrupted_project_locked(key, normalized)
                 self._write()
                 return
             previous = self._state.chat_sessions.get(key, SessionState())
@@ -281,7 +331,16 @@ class StateStore:
                 codex_thread_id=thread_id,
                 session_turn_count=turn_count + 1,
             )
+            self._clear_interrupted_project_locked(key, DEFAULT_PROJECT)
             self._write()
+
+    def _clear_interrupted_project_locked(self, chat_id: str, project: str) -> None:
+        projects = self._state.interrupted_projects.get(chat_id)
+        if projects is None:
+            return
+        projects.discard(project)
+        if not projects:
+            self._state.interrupted_projects.pop(chat_id, None)
 
     def _write(self) -> None:
         data = {
@@ -293,6 +352,11 @@ class StateStore:
             },
             "active_projects": self._state.active_projects,
             "automatic_file_delivery": self._state.automatic_file_delivery,
+            "interrupted_projects": {
+                chat_id: sorted(projects)
+                for chat_id, projects in self._state.interrupted_projects.items()
+                if projects
+            },
             "project_sessions": {
                 chat_id: {
                     project: asdict(session)

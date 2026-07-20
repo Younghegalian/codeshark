@@ -107,10 +107,10 @@ class Config:
     high_assurance_feedback_iterations: int = 2
     high_assurance_uses_finalizer: bool = True
     poll_timeout_seconds: int = 30
-    task_timeout_seconds: int = 1800
+    task_timeout_seconds: int = 0
     queue_size: int = 20
     worker_count: int = 8
-    max_session_turns: int = 30
+    max_session_turns: int = 120
     memory_max_chars: int = 12000
     codex_network_access: bool = False
     admin_full_access: bool = False
@@ -318,18 +318,18 @@ def load_config(path: Path | None = None) -> Config:
         )
 
     poll_timeout = _require_int(data, "poll_timeout_seconds", 30)
-    task_timeout = _require_int(data, "task_timeout_seconds", 1800)
+    task_timeout = _require_int(data, "task_timeout_seconds", 0)
     queue_size = _require_int(data, "queue_size", 20)
     worker_count = _require_int(data, "worker_count", 8)
-    max_session_turns = _require_int(data, "max_session_turns", 30)
+    max_session_turns = _require_int(data, "max_session_turns", 120)
     memory_max_chars = _require_int(data, "memory_max_chars", 12000)
     codex_network_access = _require_bool(data, "codex_network_access", False)
     admin_full_access = _require_bool(data, "admin_full_access", False)
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
         raise ConfigError("poll_timeout_seconds must be between 1 and 50")
-    if not 30 <= task_timeout <= 86400:
-        raise ConfigError("task_timeout_seconds must be between 30 and 86400")
+    if not 0 <= task_timeout <= 86400:
+        raise ConfigError("task_timeout_seconds must be 0 (disabled) or between 30 and 86400")
     if queue_size < 1:
         raise ConfigError("queue_size must be positive")
     if worker_count < 1:
@@ -1036,10 +1036,10 @@ def write_local_config(
             "high_assurance_feedback_iterations = 2",
             "high_assurance_uses_finalizer = true",
             "poll_timeout_seconds = 30",
-            "task_timeout_seconds = 1800",
+            "task_timeout_seconds = 0",
             "queue_size = 20",
             "worker_count = 8",
-            "max_session_turns = 30",
+            "max_session_turns = 120",
             "memory_max_chars = 12000",
             "codex_network_access = false",
             "admin_full_access = false",

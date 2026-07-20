@@ -34,6 +34,16 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertNotIn("--add-dir", command)
         self.assertIn("mcp_servers.github.enabled=false", command)
 
+    def test_zero_timeout_disables_the_runner_deadline(self) -> None:
+        runner = CodexRunner(
+            binary=Path("/tmp/codex"),
+            profile="codex-codeshark",
+            workdir=Path("/tmp/workspace"),
+            timeout_seconds=0,
+        )
+
+        self.assertIsNone(runner.timeout_seconds)
+
     def test_pins_configured_model_for_admin_tasks(self) -> None:
         runner = CodexRunner(
             binary=Path("/tmp/codex"),

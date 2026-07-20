@@ -100,6 +100,18 @@ class StateStoreTests(unittest.TestCase):
             self.assertTrue(restored.automatic_file_delivery_enabled(123))
             self.assertFalse(restored.automatic_file_delivery_enabled(456))
 
+    def test_preserves_an_interrupted_project_session_until_a_successful_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            store = StateStore(path)
+            store.set_session_thread_id(123, "thread-1", "Research")
+            store.mark_session_interrupted(123, "Research")
+
+            restored = StateStore(path)
+            self.assertTrue(restored.session_interrupted(123, "Research"))
+            restored.record_session_turn(123, "thread-1", "Research")
+            self.assertFalse(restored.session_interrupted(123, "Research"))
+
 
 if __name__ == "__main__":
     unittest.main()

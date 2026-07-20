@@ -154,7 +154,7 @@ class CodexRunner:
         self.workdir = workdir
         self.restricted_workdir = restricted_workdir or workdir
         self.restricted_codex_home = restricted_codex_home
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = timeout_seconds or None
         self.model = model
         self.model_reasoning_effort = model_reasoning_effort
         self.role = role
@@ -661,7 +661,11 @@ class CodexRunner:
             env=self._child_env(),
             start_new_session=True,
         )
-        deadline = time.monotonic() + self.timeout_seconds
+        deadline = (
+            time.monotonic() + self.timeout_seconds
+            if self.timeout_seconds is not None
+            else None
+        )
         active_thread_id = thread_id
         messages: list[str] = []
         streamed_message = ""
@@ -847,7 +851,7 @@ class CodexRunner:
         process: subprocess.Popen[str],
         method: str,
         params: dict[str, object],
-        deadline: float,
+        deadline: float | None,
     ) -> dict[str, object]:
         with self._lock:
             request_id = self._next_rpc_id
@@ -872,13 +876,13 @@ class CodexRunner:
     def _read_server_message(
         self,
         process: subprocess.Popen[str],
-        deadline: float,
+        deadline: float | None,
     ) -> dict[str, object] | None:
         if process.stdout is None:
             raise RuntimeError("Codex app-server stdout is unavailable")
         while b"\n" not in self._server_read_buffer:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
                 return None
             ready, _, _ = select.select([process.stdout.fileno()], [], [], remaining)
             if not ready:
