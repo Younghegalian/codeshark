@@ -707,6 +707,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         failed = self.app.store.enqueue_task(456, "check", source="telegram", ephemeral=False)
         failed = self.app.store.claim_next_task()
         self.app.store.finish_task(failed.id, "failed", "brief diagnostic")
+        self.app.store.enqueue_task(
+            789,
+            "[[CODESHARK_PROJECT: Queued Project]]\nqueued secret request",
+            source="telegram",
+            ephemeral=False,
+        )
 
         self.app._write_menu_status(1)
 
@@ -732,6 +738,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
+        self.assertEqual(payload["queued_tasks"][0]["project"], "Queued Project")
+        self.assertEqual(payload["recent_deliveries"][0]["project"], "Private Project")
+        self.assertEqual(payload["recent_deliveries"][0]["artifacts"], ["final-report.pdf"])
+        self.assertEqual(payload["recent_deliveries"][0]["artifact_paths"], ["/safe/root/final-report.pdf"])
+        self.assertEqual(payload["projects"][0]["project"], "Private Project")
+        self.assertEqual(payload["projects"][0]["active_task_count"], 1)
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
         self.assertEqual(payload["last_failure"]["message"], "brief diagnostic")
         self.assertEqual(payload["model_usage_5h"][0]["model"], "gpt-5.6-sol")
@@ -742,6 +754,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["activity_log"][0]["phase"], "primary")
         self.assertEqual(payload["activity_log"][0]["outcome"], "completed")
         self.assertNotIn("secret request text", json.dumps(payload))
+        self.assertNotIn("queued secret request", json.dumps(payload))
 
     def test_private_follow_up_steers_an_active_safe_task(self) -> None:
         runner = FakeCodexRunner()

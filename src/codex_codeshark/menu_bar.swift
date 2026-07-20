@@ -26,6 +26,70 @@ struct DashboardFailure: Decodable {
     }
 }
 
+struct DashboardQueuedTask: Decodable, Identifiable {
+    let id: String
+    let project: String
+    let createdAt: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, project
+        case createdAt = "created_at"
+    }
+}
+
+struct DashboardDelivery: Decodable, Identifiable {
+    let taskID: String
+    let project: String
+    let phase: String
+    let deliveryState: String
+    let artifacts: [String]
+    let artifactPaths: [String]
+    let updatedAt: Int
+
+    var id: String { taskID }
+
+    enum CodingKeys: String, CodingKey {
+        case project, phase, artifacts
+        case taskID = "task_id"
+        case deliveryState = "delivery_state"
+        case artifactPaths = "artifact_paths"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct DashboardFailedDelivery: Decodable, Identifiable {
+    let id: String
+    let attempts: Int
+    let lastError: String
+    let updatedAt: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, attempts
+        case lastError = "last_error"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct DashboardProject: Decodable, Identifiable {
+    let project: String
+    let activeTaskCount: Int
+    let queuedTaskCount: Int
+    let deliveryCount: Int
+    let artifactCount: Int
+    let updatedAt: Int
+
+    var id: String { project }
+
+    enum CodingKeys: String, CodingKey {
+        case project
+        case activeTaskCount = "active_task_count"
+        case queuedTaskCount = "queued_task_count"
+        case deliveryCount = "delivery_count"
+        case artifactCount = "artifact_count"
+        case updatedAt = "updated_at"
+    }
+}
+
 struct DashboardModelAssignment: Decodable, Identifiable {
     let model: String
     let reasoningEffort: String
@@ -331,7 +395,11 @@ struct DashboardSnapshot: Decodable {
     let workspacePath: String
     let modelAssignments: [DashboardModelAssignment]
     let activeTasks: [DashboardTask]
+    let queuedTasks: [DashboardQueuedTask]
     let recentArtifacts: [String]
+    let recentDeliveries: [DashboardDelivery]
+    let failedDeliveries: [DashboardFailedDelivery]
+    let projects: [DashboardProject]
     let lastFailure: DashboardFailure?
     let activityLog: [DashboardActivityLog]
     let modelUsage5h: [DashboardModelUsage]
@@ -348,7 +416,11 @@ struct DashboardSnapshot: Decodable {
         workspacePath: "",
         modelAssignments: [],
         activeTasks: [],
+        queuedTasks: [],
         recentArtifacts: [],
+        recentDeliveries: [],
+        failedDeliveries: [],
+        projects: [],
         lastFailure: nil,
         activityLog: [],
         modelUsage5h: [],
@@ -366,7 +438,11 @@ struct DashboardSnapshot: Decodable {
         case workspacePath = "workspace_path"
         case modelAssignments = "model_assignments"
         case activeTasks = "active_tasks"
+        case queuedTasks = "queued_tasks"
         case recentArtifacts = "recent_artifacts"
+        case recentDeliveries = "recent_deliveries"
+        case failedDeliveries = "failed_deliveries"
+        case projects
         case lastFailure = "last_failure"
         case activityLog = "activity_log"
         case modelUsage5h = "model_usage_5h"
@@ -384,7 +460,11 @@ struct DashboardSnapshot: Decodable {
         workspacePath: String,
         modelAssignments: [DashboardModelAssignment],
         activeTasks: [DashboardTask],
+        queuedTasks: [DashboardQueuedTask],
         recentArtifacts: [String],
+        recentDeliveries: [DashboardDelivery],
+        failedDeliveries: [DashboardFailedDelivery],
+        projects: [DashboardProject],
         lastFailure: DashboardFailure?,
         activityLog: [DashboardActivityLog],
         modelUsage5h: [DashboardModelUsage],
@@ -400,7 +480,11 @@ struct DashboardSnapshot: Decodable {
         self.workspacePath = workspacePath
         self.modelAssignments = modelAssignments
         self.activeTasks = activeTasks
+        self.queuedTasks = queuedTasks
         self.recentArtifacts = recentArtifacts
+        self.recentDeliveries = recentDeliveries
+        self.failedDeliveries = failedDeliveries
+        self.projects = projects
         self.lastFailure = lastFailure
         self.activityLog = activityLog
         self.modelUsage5h = modelUsage5h
@@ -419,7 +503,11 @@ struct DashboardSnapshot: Decodable {
         workspacePath = try container.decodeIfPresent(String.self, forKey: .workspacePath) ?? ""
         modelAssignments = try container.decodeIfPresent([DashboardModelAssignment].self, forKey: .modelAssignments) ?? []
         activeTasks = try container.decodeIfPresent([DashboardTask].self, forKey: .activeTasks) ?? []
+        queuedTasks = try container.decodeIfPresent([DashboardQueuedTask].self, forKey: .queuedTasks) ?? []
         recentArtifacts = try container.decodeIfPresent([String].self, forKey: .recentArtifacts) ?? []
+        recentDeliveries = try container.decodeIfPresent([DashboardDelivery].self, forKey: .recentDeliveries) ?? []
+        failedDeliveries = try container.decodeIfPresent([DashboardFailedDelivery].self, forKey: .failedDeliveries) ?? []
+        projects = try container.decodeIfPresent([DashboardProject].self, forKey: .projects) ?? []
         lastFailure = try container.decodeIfPresent(DashboardFailure.self, forKey: .lastFailure)
         activityLog = try container.decodeIfPresent([DashboardActivityLog].self, forKey: .activityLog) ?? []
         modelUsage5h = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage5h) ?? []
@@ -631,6 +719,366 @@ struct ExecutionLogView: View {
         }
         .padding(16)
         .frame(width: 380, height: 360)
+    }
+}
+
+private func deliveryStateTitle(_ state: String) -> String {
+    switch state {
+    case "delivered":
+        return "Delivered"
+    case "failed":
+        return "Needs follow-up"
+    case "required":
+        return "Awaiting delivery"
+    case "not-requested":
+        return "No file requested"
+    default:
+        return state.replacingOccurrences(of: "-", with: " ").capitalized
+    }
+}
+
+private struct OperationsFooter: View {
+    let primaryTitle: String
+    let primaryAction: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        HStack {
+            Button(primaryTitle, action: primaryAction)
+                .buttonStyle(.bordered)
+            Spacer()
+            Button("Close", action: close)
+                .buttonStyle(.bordered)
+        }
+    }
+}
+
+struct TaskQueueView: View {
+    @ObservedObject var model: DashboardModel
+    let showLogs: () -> Void
+    let close: () -> Void
+
+    private var snapshot: DashboardSnapshot { model.snapshot }
+    private var queueCount: Int { max(snapshot.queueCount, snapshot.queuedTasks.count) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Tasks")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("\(snapshot.activeTasks.count) active · \(queueCount) queued")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !snapshot.activeTasks.isEmpty {
+                        Text("ACTIVE")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(snapshot.activeTasks) { task in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(task.project)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(elapsedText(task.elapsedSeconds))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("\(task.phase) · \(compactModelName(task.model)) · \(task.reasoningEffort)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    if !snapshot.queuedTasks.isEmpty {
+                        Text("QUEUE")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, snapshot.activeTasks.isEmpty ? 0 : 4)
+                        ForEach(snapshot.queuedTasks) { task in
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(task.project)
+                                        .font(.subheadline.weight(.medium))
+                                        .lineLimit(1)
+                                    Text("Queued \(timeAgoText(task.createdAt)) · \(task.id)")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "clock")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    } else if snapshot.queueCount > 0 {
+                        Label("\(snapshot.queueCount) queued work item\(snapshot.queueCount == 1 ? "" : "s")", systemImage: "clock")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    }
+
+                    if snapshot.activeTasks.isEmpty && snapshot.queuedTasks.isEmpty && snapshot.queueCount == 0 {
+                        Label("No active or queued work", systemImage: "checkmark.circle")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    }
+                }
+            }
+
+            Divider()
+            OperationsFooter(primaryTitle: "Logs", primaryAction: showLogs, close: close)
+        }
+        .padding(16)
+        .frame(width: 460, height: 430, alignment: .topLeading)
+    }
+}
+
+struct DeliveryCenterView: View {
+    @ObservedObject var model: DashboardModel
+    let showLogs: () -> Void
+    let revealArtifacts: ([String]) -> Void
+    let close: () -> Void
+
+    private var snapshot: DashboardSnapshot { model.snapshot }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Delivery")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Recent file outcomes and Telegram delivery failures.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !snapshot.failedDeliveries.isEmpty {
+                        Text("NEEDS ATTENTION")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(snapshot.failedDeliveries) { delivery in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Label("Telegram delivery \(delivery.id)", systemImage: "exclamationmark.triangle.fill")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(.red)
+                                    Spacer()
+                                    Text("\(delivery.attempts)x")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(delivery.lastError)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+
+                    if !snapshot.recentDeliveries.isEmpty {
+                        Text("RECENT")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, snapshot.failedDeliveries.isEmpty ? 0 : 4)
+                        ForEach(snapshot.recentDeliveries) { delivery in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(delivery.project)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(deliveryStateTitle(delivery.deliveryState))
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(delivery.deliveryState == "failed" ? .red : .secondary)
+                                }
+                                Text(delivery.artifacts.isEmpty ? "No attached file" : delivery.artifacts.joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                                Text("\(delivery.phase) · \(timeAgoText(delivery.updatedAt))")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                if !delivery.artifactPaths.isEmpty {
+                                    Button("Reveal", action: { revealArtifacts(delivery.artifactPaths) })
+                                        .buttonStyle(.bordered)
+                                        .controlSize(.small)
+                                }
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    } else if !snapshot.recentArtifacts.isEmpty {
+                        Text("RECENT FILES")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, snapshot.failedDeliveries.isEmpty ? 0 : 4)
+                        ForEach(snapshot.recentArtifacts, id: \.self) { artifact in
+                            Label(artifact, systemImage: "doc")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 2)
+                        }
+                    }
+
+                    if snapshot.failedDeliveries.isEmpty && snapshot.recentDeliveries.isEmpty && snapshot.recentArtifacts.isEmpty {
+                        Label("No delivery activity yet", systemImage: "tray")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    }
+                }
+            }
+
+            Divider()
+            OperationsFooter(primaryTitle: "Logs", primaryAction: showLogs, close: close)
+        }
+        .padding(16)
+        .frame(width: 500, height: 470, alignment: .topLeading)
+    }
+}
+
+struct ProjectOverviewView: View {
+    @ObservedObject var model: DashboardModel
+    let revealWorkspace: () -> Void
+    let close: () -> Void
+
+    private var snapshot: DashboardSnapshot { model.snapshot }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Projects")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Local overview only. Telegram project sessions remain isolated by conversation.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    if snapshot.projects.isEmpty {
+                        Label("No project activity yet", systemImage: "folder")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 8)
+                    } else {
+                        ForEach(snapshot.projects) { project in
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(project.project)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if project.updatedAt > 0 {
+                                        Text(timeAgoText(project.updatedAt))
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text("\(project.activeTaskCount) active · \(project.queuedTaskCount) queued · \(project.deliveryCount) deliveries · \(project.artifactCount) files")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            OperationsFooter(primaryTitle: "Reveal Workspace", primaryAction: revealWorkspace, close: close)
+        }
+        .padding(16)
+        .frame(width: 500, height: 420, alignment: .topLeading)
+    }
+}
+
+struct AttentionView: View {
+    @ObservedObject var model: DashboardModel
+    let showLogs: () -> Void
+    let close: () -> Void
+
+    private var snapshot: DashboardSnapshot { model.snapshot }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Attention")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Failures that may need a retry or local inspection.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            if snapshot.lastFailure == nil && snapshot.failedDeliveries.isEmpty {
+                Spacer()
+                Label("All clear", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.green)
+                Text("No task or Telegram delivery failure is awaiting attention.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let failure = snapshot.lastFailure {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("Task \(failure.taskID)", systemImage: "xmark.circle.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.red)
+                                Text(failure.message)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        ForEach(snapshot.failedDeliveries) { delivery in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("Delivery \(delivery.id) · \(delivery.attempts)x", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                                Text(delivery.lastError)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+            }
+
+            Divider()
+            OperationsFooter(primaryTitle: "Logs", primaryAction: showLogs, close: close)
+        }
+        .padding(16)
+        .frame(width: 460, height: 360, alignment: .topLeading)
     }
 }
 
@@ -1034,6 +1482,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private let dashboard: DashboardModel
     private var logPanel: NSPanel?
     private var usagePanel: NSPanel?
+    private var taskPanel: NSPanel?
+    private var deliveryPanel: NSPanel?
+    private var projectsPanel: NSPanel?
+    private var attentionPanel: NSPanel?
     private var modelRoutingPanel: NSPanel?
     private var orchestrationPanel: NSPanel?
     private var modelPickers: [String: NSPopUpButton] = [:]
@@ -1101,21 +1553,22 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         menu.addItem(status)
         menu.addItem(.separator())
 
-        addSection("Recent", to: menu)
-        if snapshot.recentArtifacts.isEmpty {
-            addSecondary("No recent delivery", to: menu)
-        } else {
-            for artifact in snapshot.recentArtifacts.prefix(3) {
-                addStatic(artifact, to: menu)
-            }
-        }
-
         if let failure = snapshot.lastFailure {
             menu.addItem(.separator())
             addSection("Last Task", to: menu)
             addSecondary(failure.message, to: menu)
         }
 
+        menu.addItem(.separator())
+        let taskTitle = snapshot.queueCount > 0 || snapshot.activeTaskCount > 0
+            ? "Tasks · \(snapshot.activeTaskCount) active · \(snapshot.queueCount) queued"
+            : "Tasks"
+        menu.addItem(actionItem(taskTitle, action: #selector(openTasks(_:))))
+        menu.addItem(actionItem("Delivery", action: #selector(openDelivery(_:))))
+        menu.addItem(actionItem("Projects", action: #selector(openProjects(_:))))
+        let attentionCount = (snapshot.lastFailure == nil ? 0 : 1) + snapshot.failedDeliveries.count
+        let attentionTitle = attentionCount > 0 ? "Attention · \(attentionCount)" : "Attention"
+        menu.addItem(actionItem(attentionTitle, action: #selector(openAttention(_:))))
         menu.addItem(.separator())
         menu.addItem(actionItem("Model Routing", action: #selector(openModelRouting(_:))))
         menu.addItem(actionItem("Orchestration", action: #selector(openOrchestration(_:))))
@@ -1137,12 +1590,6 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 .foregroundColor: NSColor.secondaryLabelColor,
             ]
         )
-        target.addItem(item)
-    }
-
-    private func addStatic(_ title: String, to target: NSMenu) {
-        let item = NSMenuItem(title: title, action: #selector(ignoreMenuItem(_:)), keyEquivalent: "")
-        item.target = self
         target.addItem(item)
     }
 
@@ -1195,10 +1642,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
     }
 
-    @objc private func ignoreMenuItem(_ sender: Any?) {}
-
     @objc private func openModelRouting(_ sender: Any?) {
         configureModels()
+    }
+
+    @objc private func openTasks(_ sender: Any?) {
+        showTasks()
+    }
+
+    @objc private func openDelivery(_ sender: Any?) {
+        showDelivery()
+    }
+
+    @objc private func openProjects(_ sender: Any?) {
+        showProjects()
+    }
+
+    @objc private func openAttention(_ sender: Any?) {
+        showAttention()
     }
 
     @objc private func openOrchestration(_ sender: Any?) {
@@ -1669,6 +2130,127 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         usagePanel = panel
     }
 
+    private func showTasks() {
+        dashboard.refresh()
+        if let panel = taskPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 430),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Tasks"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        panel.contentViewController = NSHostingController(
+            rootView: TaskQueueView(
+                model: dashboard,
+                showLogs: { [weak self] in self?.showLogs() },
+                close: { [weak self] in self?.taskPanel?.close() }
+            )
+        )
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        taskPanel = panel
+    }
+
+    private func showDelivery() {
+        dashboard.refresh()
+        if let panel = deliveryPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 470),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Delivery"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        panel.contentViewController = NSHostingController(
+            rootView: DeliveryCenterView(
+                model: dashboard,
+                showLogs: { [weak self] in self?.showLogs() },
+                revealArtifacts: { [weak self] paths in self?.revealArtifacts(paths) },
+                close: { [weak self] in self?.deliveryPanel?.close() }
+            )
+        )
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        deliveryPanel = panel
+    }
+
+    private func showProjects() {
+        dashboard.refresh()
+        if let panel = projectsPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Projects"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        panel.contentViewController = NSHostingController(
+            rootView: ProjectOverviewView(
+                model: dashboard,
+                revealWorkspace: { [weak self] in self?.revealWorkspace() },
+                close: { [weak self] in self?.projectsPanel?.close() }
+            )
+        )
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        projectsPanel = panel
+    }
+
+    private func showAttention() {
+        dashboard.refresh()
+        if let panel = attentionPanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 360),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Attention"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        panel.contentViewController = NSHostingController(
+            rootView: AttentionView(
+                model: dashboard,
+                showLogs: { [weak self] in self?.showLogs() },
+                close: { [weak self] in self?.attentionPanel?.close() }
+            )
+        )
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        attentionPanel = panel
+    }
+
     private func showLogs() {
         dashboard.refresh()
         if let panel = logPanel {
@@ -1715,6 +2297,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             orchestrationFinalization = [:]
         } else if window == usagePanel {
             usagePanel = nil
+        } else if window == taskPanel {
+            taskPanel = nil
+        } else if window == deliveryPanel {
+            deliveryPanel = nil
+        } else if window == projectsPanel {
+            projectsPanel = nil
+        } else if window == attentionPanel {
+            attentionPanel = nil
         } else if window == logPanel {
             logPanel = nil
         }
@@ -1722,6 +2312,28 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
     private func revealLogFolder() {
         NSWorkspace.shared.open(URL(fileURLWithPath: projectRoot).appendingPathComponent("runtime"))
+    }
+
+    private func revealWorkspace() {
+        dashboard.refresh()
+        let path = dashboard.snapshot.workspacePath
+        guard !path.isEmpty else { return }
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+    }
+
+    private func revealArtifacts(_ paths: [String]) {
+        let files = paths.compactMap { path -> URL? in
+            let url = URL(fileURLWithPath: path)
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                return nil
+            }
+            return url
+        }
+        guard !files.isEmpty else {
+            showError("The delivered file is no longer available locally.")
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting(files)
     }
 
     private func runServiceCommand(_ arguments: [String]) {

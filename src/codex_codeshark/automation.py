@@ -715,6 +715,15 @@ class AgentStore:
             ).fetchone()
         return self._manifest(row)
 
+    def recent_task_manifests(self, *, limit: int = 8) -> list[TaskManifest]:
+        """Return recent delivery evidence for the local operational dashboard."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM task_manifests ORDER BY updated_at DESC LIMIT ?",
+                (max(1, limit),),
+            ).fetchall()
+        return [manifest for row in rows if (manifest := self._manifest(row)) is not None]
+
     def record_model_run(
         self,
         *,

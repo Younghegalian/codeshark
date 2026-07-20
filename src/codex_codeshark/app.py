@@ -516,6 +516,62 @@ class AgentApp:
                     }
                 )
             latest_failure = self.store.latest_failure()
+            queued_tasks = [
+                task
+                for task in self.store.list_tasks(limit=max(20, self.config.queue_size + 10))
+                if task.status == "queued" and not task.ephemeral
+            ]
+            recent_manifests = self.store.recent_task_manifests(limit=8)
+            failed_deliveries = self.store.list_failed_deliveries(limit=8)
+            projects: dict[str, dict[str, object]] = {}
+
+            def project_summary(project: str) -> dict[str, object]:
+                return projects.setdefault(
+                    project,
+                    {
+                        "project": project,
+                        "active_task_count": 0,
+                        "queued_task_count": 0,
+                        "delivery_count": 0,
+                        "artifact_count": 0,
+                        "updated_at": 0,
+                    },
+                )
+
+            for item in active_summary:
+                project_summary(str(item["project"]))["active_task_count"] = (
+                    int(project_summary(str(item["project"]))["active_task_count"]) + 1
+                )
+            queued_summary = []
+            for task in queued_tasks:
+                project = DEFAULT_PROJECT if task.restricted else unpack_project_task(task.prompt)[0]
+                project_summary(project)["queued_task_count"] = (
+                    int(project_summary(project)["queued_task_count"]) + 1
+                )
+                queued_summary.append(
+                    {
+                        "id": task.id,
+                        "project": project,
+                        "created_at": int(task.created_at),
+                    }
+                )
+            delivery_summary = []
+            for manifest in recent_manifests:
+                project = project_summary(manifest.project)
+                project["delivery_count"] = int(project["delivery_count"]) + 1
+                project["artifact_count"] = int(project["artifact_count"]) + len(manifest.artifacts)
+                project["updated_at"] = max(int(project["updated_at"]), int(manifest.updated_at))
+                delivery_summary.append(
+                    {
+                        "task_id": manifest.task_id,
+                        "project": manifest.project,
+                        "phase": manifest.phase,
+                        "delivery_state": manifest.delivery_state,
+                        "artifacts": [Path(item).name for item in manifest.artifacts],
+                        "artifact_paths": list(manifest.artifacts),
+                        "updated_at": int(manifest.updated_at),
+                    }
+                )
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
             weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
             project_usage = self.store.project_model_usage(since=now - 5 * 60 * 60)
@@ -607,7 +663,27 @@ class AgentApp:
                             for tier, profile in profiles.items()
                         },
                         "active_tasks": active_summary,
+                        "queued_tasks": queued_summary,
                         "recent_artifacts": self.store.recent_artifact_names(),
+                        "recent_deliveries": delivery_summary,
+                        "failed_deliveries": [
+                            {
+                                "id": delivery.id,
+                                "attempts": delivery.attempts,
+                                "last_error": delivery.last_error[:180],
+                                "updated_at": int(delivery.updated_at),
+                            }
+                            for delivery in failed_deliveries
+                        ],
+                        "projects": sorted(
+                            projects.values(),
+                            key=lambda item: (
+                                -int(item["active_task_count"]),
+                                -int(item["queued_task_count"]),
+                                -int(item["updated_at"]),
+                                str(item["project"]),
+                            ),
+                        ),
                         "last_failure": (
                             {
                                 "task_id": latest_failure.task_id,
