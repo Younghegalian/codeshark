@@ -193,7 +193,7 @@ worker_count = 8
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
-Codeshark defaults to Luna for routine requests and task preflight, Terra for focused work and independent validation, and Sol for the primary, rework, and reconciliation path of cross-validated work. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
+Codeshark uses five general task tiers: Quick, Routine, Standard, Deep, and High assurance. Standard adds independent validation; Deep adds planning and a bounded correction loop; High assurance also adds an independent research pass. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
 
 ```toml
 routine_model = "gpt-5.6-luna"
@@ -208,6 +208,10 @@ feedback_model = "gpt-5.6-terra"
 feedback_reasoning_effort = "high"
 preflight_model = "gpt-5.6-luna"
 preflight_reasoning_effort = "low"
+research_model = "gpt-5.6-luna"
+research_reasoning_effort = "medium"
+finalizer_model = "gpt-5.6-sol"
+finalizer_reasoning_effort = "medium"
 ```
 
 Keep read-only inspection roots separate:

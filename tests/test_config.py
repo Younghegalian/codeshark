@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 from codex_codeshark.config import (
     Config,
     ConfigError,
+    OrchestrationProfile,
     configured_codex_runtime,
     validate_codex_profile,
     validate_codex_version,
@@ -168,24 +169,23 @@ class ConfigTests(unittest.TestCase):
             )
 
             updated = set_orchestration(
-                standard_uses_preflight=True,
-                standard_uses_validator=True,
-                standard_feedback_iterations=1,
-                deep_uses_preflight=True,
-                deep_uses_validator=True,
-                deep_feedback_iterations=3,
-                manuscript_uses_preflight=False,
-                manuscript_uses_validator=True,
-                manuscript_feedback_iterations=0,
+                profiles={
+                    "quick": OrchestrationProfile(False, False, False, 0, False),
+                    "routine": OrchestrationProfile(False, False, False, 0, False),
+                    "standard": OrchestrationProfile(True, False, True, 1, True),
+                    "deep": OrchestrationProfile(True, False, True, 3, True),
+                    "high_assurance": OrchestrationProfile(True, True, True, 2, True),
+                },
                 config_path=config_path,
             )
 
             self.assertTrue(updated.standard_uses_preflight)
             self.assertEqual(updated.deep_feedback_iterations, 3)
-            self.assertFalse(updated.manuscript_uses_preflight)
+            self.assertTrue(updated.high_assurance_uses_research)
             text = config_path.read_text(encoding="utf-8")
             self.assertIn('primary_model = "gpt-5.6-sol"', text)
             self.assertIn("standard_feedback_iterations = 1", text)
+            self.assertIn("high_assurance_uses_research = true", text)
 
     def test_validates_bot_token_without_echoing_invalid_value(self) -> None:
         token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456"

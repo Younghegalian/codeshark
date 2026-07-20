@@ -674,13 +674,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(payload["state"], "working")
         self.assertEqual(payload["workspace_path"], str(self.config.workdir))
-        self.assertEqual(payload["model_assignments"][2]["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_assignments"][2]["role"], "Primary")
-        self.assertEqual(payload["model_assignments"][2]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][2]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][3]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][4]["role"], "Validation")
-        self.assertEqual(payload["model_assignments"][5]["role"], "Feedback")
+        self.assertEqual(payload["model_assignments"][3]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][3]["role"], "Primary")
+        self.assertEqual(payload["model_assignments"][3]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][3]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][4]["role"], "Rework")
+        self.assertEqual(payload["model_assignments"][5]["role"], "Validation")
+        self.assertEqual(payload["model_assignments"][6]["role"], "Feedback")
+        self.assertEqual(payload["model_assignments"][7]["role"], "Finalization")
+        self.assertEqual(
+            tuple(payload["orchestration"]),
+            ("quick", "routine", "standard", "deep", "high_assurance"),
+        )
+        self.assertTrue(payload["orchestration"]["high_assurance"]["uses_research"])
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
@@ -1113,12 +1119,18 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         plan = app._workflow_plan(task, request)
         app._execute_task(task)
 
-        self.assertEqual(plan.tier, "manuscript")
+        self.assertEqual(plan.tier, "high-assurance")
         self.assertTrue(plan.uses_preflight)
         self.assertEqual(plan.feedback_iterations, 2)
-        self.assertIn("Journal manuscript editorial QA 논문 원고 검수", runner.prompts[1][0])
-        self.assertIn("Manuscript author-side editorial QA", runner.prompts[1][0])
-        self.assertIn("Manuscript editorial acceptance gate", runner.prompts[2][0])
+        self.assertTrue(
+            any("Journal manuscript editorial QA 논문 원고 검수" in prompt[0] for prompt in runner.prompts)
+        )
+        self.assertTrue(
+            any("Manuscript author-side editorial QA" in prompt[0] for prompt in runner.prompts)
+        )
+        self.assertTrue(
+            any("Manuscript editorial acceptance gate" in prompt[0] for prompt in runner.prompts)
+        )
 
     def test_manual_learning_is_applied_immediately(self) -> None:
         self.app._handle_update(self.update(123, "/learn memory The user prefers concise replies"))
@@ -1159,6 +1171,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
         self.assertEqual(len(self.app._feedback_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._research_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._finalizer_runners), self.config.worker_count)
         workdirs = {runner.restricted_workdir for runner in self.app._worker_runners}
         homes = {runner.restricted_codex_home for runner in self.app._worker_runners}
         self.assertEqual(len(workdirs), self.config.worker_count)
@@ -1203,6 +1217,20 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.preflight_model
                 and runner.model_reasoning_effort == self.config.preflight_reasoning_effort
                 for runner in self.app._preflight_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.research_model
+                and runner.model_reasoning_effort == self.config.research_reasoning_effort
+                for runner in self.app._research_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.finalizer_model
+                and runner.model_reasoning_effort == self.config.finalizer_reasoning_effort
+                for runner in self.app._finalizer_runners
             )
         )
 
@@ -1544,18 +1572,18 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             )
             return self.app._workflow_plan(task, request)
 
-        self.assertEqual(plan_for("What is the current status?").tier, "direct")
-        self.assertEqual(plan_for("Fix the README typo.").tier, "focused")
+        self.assertEqual(plan_for("What is the current status?").tier, "quick")
+        self.assertEqual(plan_for("Fix the README typo.").tier, "routine")
         self.assertEqual(
             plan_for("Analyze the failure pattern and report the root cause.").tier,
             "standard",
         )
-        deep = plan_for("Run a multi-agent high-assurance review of this migration.")
+        deep = plan_for("Run a multi-agent comprehensive review.")
         self.assertEqual(deep.tier, "deep")
         self.assertTrue(deep.uses_preflight)
-        self.assertEqual(deep.feedback_iterations, 2)
+        self.assertEqual(deep.feedback_iterations, 1)
         manuscript = plan_for("논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.")
-        self.assertEqual(manuscript.tier, "manuscript")
+        self.assertEqual(manuscript.tier, "high-assurance")
         self.assertTrue(manuscript.uses_preflight)
         self.assertEqual(manuscript.feedback_iterations, 2)
 
@@ -1564,14 +1592,20 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             replace(
                 self.config,
                 standard_uses_preflight=True,
-                standard_uses_validator=False,
+                standard_uses_research=False,
+                standard_uses_validator=True,
                 standard_feedback_iterations=0,
+                standard_uses_finalizer=False,
                 deep_uses_preflight=False,
+                deep_uses_research=True,
                 deep_uses_validator=True,
                 deep_feedback_iterations=1,
-                manuscript_uses_preflight=False,
-                manuscript_uses_validator=True,
-                manuscript_feedback_iterations=0,
+                deep_uses_finalizer=True,
+                high_assurance_uses_preflight=False,
+                high_assurance_uses_research=False,
+                high_assurance_uses_validator=True,
+                high_assurance_feedback_iterations=0,
+                high_assurance_uses_finalizer=True,
             ),
             self.api,
         )
@@ -1582,9 +1616,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         standard = plan_for("Analyze the failure pattern and report the root cause.")
         self.assertTrue(standard.uses_preflight)
-        self.assertFalse(standard.uses_validator)
-        deep = plan_for("Run a multi-agent high-assurance review of this migration.")
+        self.assertFalse(standard.uses_research)
+        self.assertTrue(standard.uses_validator)
+        deep = plan_for("Run a multi-agent comprehensive review.")
         self.assertFalse(deep.uses_preflight)
+        self.assertTrue(deep.uses_research)
         self.assertEqual(deep.feedback_iterations, 1)
         manuscript = plan_for("논문 원고 초안을 작성하고 피규어를 고쳐서 PDF로 렌더해.")
         self.assertFalse(manuscript.uses_preflight)
@@ -1622,6 +1658,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         preflight = FakeCodexRunner(
             RunResult(0, "Objective: validate the migration.", "plan", "")
         )
+        research = FakeCodexRunner(
+            RunResult(0, "Evidence targets: migration state and tests.", "research", "")
+        )
+        finalizer = FakeCodexRunner(
+            RunResult(0, "Verified migration is complete.", "primary-thread", "")
+        )
         task = app.store.enqueue_task(
             123,
             "Run a multi-agent high-assurance migration review.",
@@ -1629,18 +1671,29 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             ephemeral=False,
         )
 
-        app._execute_task(task, primary, validator, preflight, feedback_runner=feedback)
+        app._execute_task(
+            task,
+            primary,
+            validator,
+            preflight,
+            feedback_runner=feedback,
+            research_runner=research,
+            finalizer_runner=finalizer,
+        )
 
         self.assertEqual(len(preflight.prompts), 1)
         self.assertIn("preflight", preflight.prompts[0][0])
+        self.assertEqual(len(research.prompts), 1)
+        self.assertIn("research pass", research.prompts[0][0])
         self.assertEqual(len(validator.prompts), 1)
         self.assertIn("validator phase", validator.prompts[0][0])
         self.assertEqual(len(feedback.prompts), 2)
         self.assertIn("feedback verifier", feedback.prompts[0][0])
         self.assertIn("feedback verifier", feedback.prompts[1][0])
-        self.assertEqual(len(primary.prompts), 4)
+        self.assertEqual(len(primary.prompts), 3)
         self.assertIn("Internal planning brief", primary.prompts[0][0])
-        self.assertIn("finalization phase", primary.prompts[-1][0])
+        self.assertEqual(len(finalizer.prompts), 1)
+        self.assertIn("finalization phase", finalizer.prompts[0][0])
         self.assertEqual(self.api.messages, [(123, "Verified migration is complete.")])
 
     def test_cross_validation_applies_to_substantive_read_only_analysis(self) -> None:

@@ -7,6 +7,8 @@ from pathlib import Path
 from .app import AgentApp
 from .config import (
     ConfigError,
+    ORCHESTRATION_TIERS,
+    OrchestrationProfile,
     PROJECT_ROOT,
     load_bot_token,
     load_config,
@@ -59,13 +61,20 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--feedback-effort", required=True)
     models.add_argument("--preflight", required=True)
     models.add_argument("--preflight-effort", required=True)
+    models.add_argument("--research")
+    models.add_argument("--research-effort")
+    models.add_argument("--finalizer")
+    models.add_argument("--finalizer-effort")
     orchestration = commands.add_parser(
         "set-orchestration", help="set task-tier multi-agent orchestration"
     )
-    for tier in ("standard", "deep", "manuscript"):
-        orchestration.add_argument(f"--{tier}-preflight", required=True, choices=("true", "false"))
-        orchestration.add_argument(f"--{tier}-validation", required=True, choices=("true", "false"))
-        orchestration.add_argument(f"--{tier}-feedback-loops", required=True, type=int)
+    for tier in ORCHESTRATION_TIERS:
+        option = tier.replace("_", "-")
+        orchestration.add_argument(f"--{option}-planning", required=True, choices=("true", "false"))
+        orchestration.add_argument(f"--{option}-research", required=True, choices=("true", "false"))
+        orchestration.add_argument(f"--{option}-validation", required=True, choices=("true", "false"))
+        orchestration.add_argument(f"--{option}-feedback-loops", required=True, type=int)
+        orchestration.add_argument(f"--{option}-finalization", required=True, choices=("true", "false"))
     logs = commands.add_parser("logs", help="show sanitized background service logs")
     logs.add_argument("--lines", type=int, default=100)
     for name, help_text in (
@@ -147,6 +156,10 @@ def main() -> int:
                 feedback_reasoning_effort=args.feedback_effort,
                 preflight_model=args.preflight,
                 preflight_reasoning_effort=args.preflight_effort,
+                research_model=args.research,
+                research_reasoning_effort=args.research_effort,
+                finalizer_model=args.finalizer,
+                finalizer_reasoning_effort=args.finalizer_effort,
             )
             status = restart_service()
             if not status.running:
@@ -156,29 +169,28 @@ def main() -> int:
                 f"routine={config.routine_model}, primary={config.primary_model}, "
                 f"rework={config.rework_model}, validator={config.validator_model}, "
                 f"feedback={config.feedback_model}, "
-                f"preflight={config.preflight_model}"
+                f"preflight={config.preflight_model}, research={config.research_model}, "
+                f"finalizer={config.finalizer_model}"
             )
             return 0
         if args.command == "set-orchestration":
             config = set_orchestration(
-                standard_uses_preflight=args.standard_preflight == "true",
-                standard_uses_validator=args.standard_validation == "true",
-                standard_feedback_iterations=args.standard_feedback_loops,
-                deep_uses_preflight=args.deep_preflight == "true",
-                deep_uses_validator=args.deep_validation == "true",
-                deep_feedback_iterations=args.deep_feedback_loops,
-                manuscript_uses_preflight=args.manuscript_preflight == "true",
-                manuscript_uses_validator=args.manuscript_validation == "true",
-                manuscript_feedback_iterations=args.manuscript_feedback_loops,
+                profiles={
+                    tier: OrchestrationProfile(
+                        getattr(args, f"{tier}_planning") == "true",
+                        getattr(args, f"{tier}_research") == "true",
+                        getattr(args, f"{tier}_validation") == "true",
+                        getattr(args, f"{tier}_feedback_loops"),
+                        getattr(args, f"{tier}_finalization") == "true",
+                    )
+                    for tier in ORCHESTRATION_TIERS
+                }
             )
             status = restart_service()
             if not status.running:
                 raise ServiceError(status.detail or "service did not restart")
             print(
-                "Orchestration: "
-                f"standard={int(config.standard_uses_preflight)}/{int(config.standard_uses_validator)}/{config.standard_feedback_iterations}; "
-                f"deep={int(config.deep_uses_preflight)}/{int(config.deep_uses_validator)}/{config.deep_feedback_iterations}; "
-                f"manuscript={int(config.manuscript_uses_preflight)}/{int(config.manuscript_uses_validator)}/{config.manuscript_feedback_iterations}"
+                "Orchestration updated: " + ", ".join(ORCHESTRATION_TIERS)
             )
             return 0
         if args.command == "export-data":

@@ -37,10 +37,26 @@ _BOT_TOKEN_PATTERN = re.compile(r"[0-9]+:[A-Za-z0-9_-]+")
 _MIN_PERMISSION_PROFILE_VERSION = (0, 138, 0)
 _MODEL_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
 _REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
+ORCHESTRATION_TIERS = (
+    "quick",
+    "routine",
+    "standard",
+    "deep",
+    "high_assurance",
+)
 
 
 class ConfigError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class OrchestrationProfile:
+    uses_preflight: bool
+    uses_research: bool
+    uses_validator: bool
+    feedback_iterations: int
+    uses_finalizer: bool
 
 
 @dataclass(frozen=True)
@@ -61,15 +77,35 @@ class Config:
     feedback_reasoning_effort: str = "high"
     preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
+    research_model: str = "gpt-5.6-luna"
+    research_reasoning_effort: str = "medium"
+    finalizer_model: str = "gpt-5.6-sol"
+    finalizer_reasoning_effort: str = "medium"
+    quick_uses_preflight: bool = False
+    quick_uses_research: bool = False
+    quick_uses_validator: bool = False
+    quick_feedback_iterations: int = 0
+    quick_uses_finalizer: bool = False
+    routine_uses_preflight: bool = False
+    routine_uses_research: bool = False
+    routine_uses_validator: bool = False
+    routine_feedback_iterations: int = 0
+    routine_uses_finalizer: bool = False
     standard_uses_preflight: bool = False
+    standard_uses_research: bool = False
     standard_uses_validator: bool = True
     standard_feedback_iterations: int = 0
+    standard_uses_finalizer: bool = True
     deep_uses_preflight: bool = True
+    deep_uses_research: bool = False
     deep_uses_validator: bool = True
-    deep_feedback_iterations: int = 2
-    manuscript_uses_preflight: bool = True
-    manuscript_uses_validator: bool = True
-    manuscript_feedback_iterations: int = 2
+    deep_feedback_iterations: int = 1
+    deep_uses_finalizer: bool = True
+    high_assurance_uses_preflight: bool = True
+    high_assurance_uses_research: bool = True
+    high_assurance_uses_validator: bool = True
+    high_assurance_feedback_iterations: int = 2
+    high_assurance_uses_finalizer: bool = True
     poll_timeout_seconds: int = 30
     task_timeout_seconds: int = 1800
     queue_size: int = 20
@@ -119,6 +155,91 @@ def _require_reasoning_effort(data: dict[str, Any], key: str, default: str) -> s
     return value
 
 
+_DEFAULT_ORCHESTRATION_PROFILES = {
+    "quick": OrchestrationProfile(False, False, False, 0, False),
+    "routine": OrchestrationProfile(False, False, False, 0, False),
+    "standard": OrchestrationProfile(False, False, True, 0, True),
+    "deep": OrchestrationProfile(True, False, True, 1, True),
+    "high_assurance": OrchestrationProfile(True, True, True, 2, True),
+}
+
+
+def _load_orchestration_profile(
+    data: dict[str, Any],
+    tier: str,
+    *,
+    legacy_tier: str | None = None,
+) -> OrchestrationProfile:
+    default = _DEFAULT_ORCHESTRATION_PROFILES[tier]
+
+    def value(name: str, fallback: bool | int) -> bool | int:
+        key = f"{tier}_{name}"
+        if key in data:
+            return data[key]
+        if legacy_tier is not None:
+            legacy_key = f"{legacy_tier}_{name}"
+            if legacy_key in data:
+                return data[legacy_key]
+        return fallback
+
+    preflight = value("uses_preflight", default.uses_preflight)
+    research = value("uses_research", default.uses_research)
+    validator = value("uses_validator", default.uses_validator)
+    feedback = value("feedback_iterations", default.feedback_iterations)
+    finalizer = value("uses_finalizer", default.uses_finalizer)
+    for name, setting in (
+        ("uses_preflight", preflight),
+        ("uses_research", research),
+        ("uses_validator", validator),
+        ("uses_finalizer", finalizer),
+    ):
+        if not isinstance(setting, bool):
+            raise ConfigError(f"{tier}_{name} must be true or false")
+    if not isinstance(feedback, int) or isinstance(feedback, bool):
+        raise ConfigError(f"{tier}_feedback_iterations must be an integer")
+    return OrchestrationProfile(preflight, research, validator, feedback, finalizer)
+
+
+def orchestration_profiles(config: Config) -> dict[str, OrchestrationProfile]:
+    return {
+        "quick": OrchestrationProfile(
+            config.quick_uses_preflight,
+            config.quick_uses_research,
+            config.quick_uses_validator,
+            config.quick_feedback_iterations,
+            config.quick_uses_finalizer,
+        ),
+        "routine": OrchestrationProfile(
+            config.routine_uses_preflight,
+            config.routine_uses_research,
+            config.routine_uses_validator,
+            config.routine_feedback_iterations,
+            config.routine_uses_finalizer,
+        ),
+        "standard": OrchestrationProfile(
+            config.standard_uses_preflight,
+            config.standard_uses_research,
+            config.standard_uses_validator,
+            config.standard_feedback_iterations,
+            config.standard_uses_finalizer,
+        ),
+        "deep": OrchestrationProfile(
+            config.deep_uses_preflight,
+            config.deep_uses_research,
+            config.deep_uses_validator,
+            config.deep_feedback_iterations,
+            config.deep_uses_finalizer,
+        ),
+        "high_assurance": OrchestrationProfile(
+            config.high_assurance_uses_preflight,
+            config.high_assurance_uses_research,
+            config.high_assurance_uses_validator,
+            config.high_assurance_feedback_iterations,
+            config.high_assurance_uses_finalizer,
+        ),
+    }
+
+
 def load_config(path: Path | None = None) -> Config:
     config_path = path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
     if not config_path.is_file():
@@ -166,15 +287,23 @@ def load_config(path: Path | None = None) -> Config:
     preflight_reasoning_effort = _require_reasoning_effort(
         data, "preflight_reasoning_effort", "low"
     )
-    standard_uses_preflight = _require_bool(data, "standard_uses_preflight", False)
-    standard_uses_validator = _require_bool(data, "standard_uses_validator", True)
-    standard_feedback_iterations = _require_int(data, "standard_feedback_iterations", 0)
-    deep_uses_preflight = _require_bool(data, "deep_uses_preflight", True)
-    deep_uses_validator = _require_bool(data, "deep_uses_validator", True)
-    deep_feedback_iterations = _require_int(data, "deep_feedback_iterations", 2)
-    manuscript_uses_preflight = _require_bool(data, "manuscript_uses_preflight", True)
-    manuscript_uses_validator = _require_bool(data, "manuscript_uses_validator", True)
-    manuscript_feedback_iterations = _require_int(data, "manuscript_feedback_iterations", 2)
+    research_model = _require_model_setting(data, "research_model", "gpt-5.6-luna")
+    research_reasoning_effort = _require_reasoning_effort(
+        data, "research_reasoning_effort", "medium"
+    )
+    finalizer_model = _require_model_setting(data, "finalizer_model", primary_model)
+    finalizer_reasoning_effort = _require_reasoning_effort(
+        data, "finalizer_reasoning_effort", "medium"
+    )
+    profiles = {
+        "quick": _load_orchestration_profile(data, "quick"),
+        "routine": _load_orchestration_profile(data, "routine"),
+        "standard": _load_orchestration_profile(data, "standard"),
+        "deep": _load_orchestration_profile(data, "deep"),
+        "high_assurance": _load_orchestration_profile(
+            data, "high_assurance", legacy_tier="manuscript"
+        ),
+    }
     if not workdir.is_absolute() or not workdir.is_dir():
         raise ConfigError(f"workdir must be an existing absolute directory: {workdir}")
     if not codex_binary.is_absolute() or not codex_binary.is_file():
@@ -211,15 +340,15 @@ def load_config(path: Path | None = None) -> Config:
         raise ConfigError("memory_max_chars must be between 1000 and 20000")
     if not 1_000_000 <= attachment_max_bytes <= 50_000_000:
         raise ConfigError("attachment_max_bytes must be between 1 MB and 50 MB")
-    for tier, uses_validator, feedback_iterations in (
-        ("standard", standard_uses_validator, standard_feedback_iterations),
-        ("deep", deep_uses_validator, deep_feedback_iterations),
-        ("manuscript", manuscript_uses_validator, manuscript_feedback_iterations),
-    ):
-        if not 0 <= feedback_iterations <= 5:
+    for tier, profile in profiles.items():
+        if not 0 <= profile.feedback_iterations <= 5:
             raise ConfigError(f"{tier}_feedback_iterations must be between 0 and 5")
-        if feedback_iterations and not uses_validator:
+        if profile.feedback_iterations and not profile.uses_validator:
             raise ConfigError(f"{tier} feedback requires {tier}_uses_validator = true")
+        if (profile.uses_preflight or profile.uses_research) and not profile.uses_validator:
+            raise ConfigError(f"{tier} planning and research require {tier}_uses_validator = true")
+        if profile.uses_finalizer and not profile.uses_validator:
+            raise ConfigError(f"{tier} finalization requires {tier}_uses_validator = true")
 
     raw_read_only_roots = data.get("read_only_roots", [])
     if not isinstance(raw_read_only_roots, list) or len(raw_read_only_roots) > 20:
@@ -311,15 +440,35 @@ def load_config(path: Path | None = None) -> Config:
         feedback_reasoning_effort=feedback_reasoning_effort,
         preflight_model=preflight_model,
         preflight_reasoning_effort=preflight_reasoning_effort,
-        standard_uses_preflight=standard_uses_preflight,
-        standard_uses_validator=standard_uses_validator,
-        standard_feedback_iterations=standard_feedback_iterations,
-        deep_uses_preflight=deep_uses_preflight,
-        deep_uses_validator=deep_uses_validator,
-        deep_feedback_iterations=deep_feedback_iterations,
-        manuscript_uses_preflight=manuscript_uses_preflight,
-        manuscript_uses_validator=manuscript_uses_validator,
-        manuscript_feedback_iterations=manuscript_feedback_iterations,
+        research_model=research_model,
+        research_reasoning_effort=research_reasoning_effort,
+        finalizer_model=finalizer_model,
+        finalizer_reasoning_effort=finalizer_reasoning_effort,
+        quick_uses_preflight=profiles["quick"].uses_preflight,
+        quick_uses_research=profiles["quick"].uses_research,
+        quick_uses_validator=profiles["quick"].uses_validator,
+        quick_feedback_iterations=profiles["quick"].feedback_iterations,
+        quick_uses_finalizer=profiles["quick"].uses_finalizer,
+        routine_uses_preflight=profiles["routine"].uses_preflight,
+        routine_uses_research=profiles["routine"].uses_research,
+        routine_uses_validator=profiles["routine"].uses_validator,
+        routine_feedback_iterations=profiles["routine"].feedback_iterations,
+        routine_uses_finalizer=profiles["routine"].uses_finalizer,
+        standard_uses_preflight=profiles["standard"].uses_preflight,
+        standard_uses_research=profiles["standard"].uses_research,
+        standard_uses_validator=profiles["standard"].uses_validator,
+        standard_feedback_iterations=profiles["standard"].feedback_iterations,
+        standard_uses_finalizer=profiles["standard"].uses_finalizer,
+        deep_uses_preflight=profiles["deep"].uses_preflight,
+        deep_uses_research=profiles["deep"].uses_research,
+        deep_uses_validator=profiles["deep"].uses_validator,
+        deep_feedback_iterations=profiles["deep"].feedback_iterations,
+        deep_uses_finalizer=profiles["deep"].uses_finalizer,
+        high_assurance_uses_preflight=profiles["high_assurance"].uses_preflight,
+        high_assurance_uses_research=profiles["high_assurance"].uses_research,
+        high_assurance_uses_validator=profiles["high_assurance"].uses_validator,
+        high_assurance_feedback_iterations=profiles["high_assurance"].feedback_iterations,
+        high_assurance_uses_finalizer=profiles["high_assurance"].uses_finalizer,
         poll_timeout_seconds=poll_timeout,
         task_timeout_seconds=task_timeout,
         queue_size=queue_size,
@@ -379,6 +528,10 @@ def set_model_assignments(
     feedback_model: str | None = None,
     feedback_reasoning_effort: str | None = None,
     preflight_reasoning_effort: str | None = None,
+    research_model: str | None = None,
+    research_reasoning_effort: str | None = None,
+    finalizer_model: str | None = None,
+    finalizer_reasoning_effort: str | None = None,
 ) -> Config:
     """Persist the role-specific model routing without rewriting unrelated settings."""
     path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
@@ -396,6 +549,10 @@ def set_model_assignments(
         "feedback_reasoning_effort": feedback_reasoning_effort or current.feedback_reasoning_effort,
         "preflight_model": preflight_model,
         "preflight_reasoning_effort": preflight_reasoning_effort or current.preflight_reasoning_effort,
+        "research_model": research_model or current.research_model,
+        "research_reasoning_effort": research_reasoning_effort or current.research_reasoning_effort,
+        "finalizer_model": finalizer_model or current.finalizer_model,
+        "finalizer_reasoning_effort": finalizer_reasoning_effort or current.finalizer_reasoning_effort,
     }
     model_settings = {
         name: value for name, value in assignments.items() if name.endswith("_model")
@@ -449,33 +606,44 @@ def set_model_assignments(
 
 def set_orchestration(
     *,
-    standard_uses_preflight: bool,
-    standard_uses_validator: bool,
-    standard_feedback_iterations: int,
-    deep_uses_preflight: bool,
-    deep_uses_validator: bool,
-    deep_feedback_iterations: int,
-    manuscript_uses_preflight: bool,
-    manuscript_uses_validator: bool,
-    manuscript_feedback_iterations: int,
+    profiles: dict[str, OrchestrationProfile],
     config_path: Path | None = None,
 ) -> Config:
     """Persist the task-tier orchestration without rewriting unrelated settings."""
+    if set(profiles) != set(ORCHESTRATION_TIERS):
+        raise ConfigError("orchestration must define every task tier exactly once")
     assignments: dict[str, bool | int] = {
-        "standard_uses_preflight": standard_uses_preflight,
-        "standard_uses_validator": standard_uses_validator,
-        "standard_feedback_iterations": standard_feedback_iterations,
-        "deep_uses_preflight": deep_uses_preflight,
-        "deep_uses_validator": deep_uses_validator,
-        "deep_feedback_iterations": deep_feedback_iterations,
-        "manuscript_uses_preflight": manuscript_uses_preflight,
-        "manuscript_uses_validator": manuscript_uses_validator,
-        "manuscript_feedback_iterations": manuscript_feedback_iterations,
+        f"{tier}_uses_preflight": profile.uses_preflight
+        for tier, profile in profiles.items()
     }
+    assignments.update(
+        {
+            f"{tier}_uses_research": profile.uses_research
+            for tier, profile in profiles.items()
+        }
+    )
+    assignments.update(
+        {
+            f"{tier}_uses_validator": profile.uses_validator
+            for tier, profile in profiles.items()
+        }
+    )
+    assignments.update(
+        {
+            f"{tier}_feedback_iterations": profile.feedback_iterations
+            for tier, profile in profiles.items()
+        }
+    )
+    assignments.update(
+        {
+            f"{tier}_uses_finalizer": profile.uses_finalizer
+            for tier, profile in profiles.items()
+        }
+    )
     stage_values = [
         value
         for name, value in assignments.items()
-        if name.endswith("uses_preflight") or name.endswith("uses_validator")
+        if name.endswith(("uses_preflight", "uses_research", "uses_validator", "uses_finalizer"))
     ]
     if any(not isinstance(value, bool) for value in stage_values):
         raise ConfigError("orchestration stage settings must be true or false")
@@ -485,18 +653,27 @@ def set_orchestration(
         if name.endswith("feedback_iterations")
     ):
         raise ConfigError("orchestration feedback iterations must be between 0 and 5")
-    for tier in ("standard", "deep", "manuscript"):
+    for tier, profile in profiles.items():
         if (
-            assignments[f"{tier}_feedback_iterations"]
-            and not assignments[f"{tier}_uses_validator"]
+            profile.feedback_iterations
+            and not profile.uses_validator
         ):
             raise ConfigError(f"{tier} feedback requires validation")
+        if (profile.uses_preflight or profile.uses_research) and not profile.uses_validator:
+            raise ConfigError(f"{tier} planning and research require validation")
+        if profile.uses_finalizer and not profile.uses_validator:
+            raise ConfigError(f"{tier} finalization requires validation")
     path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
     try:
         original = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ConfigError(f"cannot read config: {exc}") from exc
     updated = original
+    updated = re.sub(
+        r"(?m)^manuscript_(?:uses_preflight|uses_validator|feedback_iterations)\s*=\s*(?:true|false|\d+)\s*\n?",
+        "",
+        updated,
+    )
     missing_settings: list[str] = []
     for setting, value in assignments.items():
         rendered = str(value).lower()
@@ -829,15 +1006,35 @@ def write_local_config(
             'feedback_reasoning_effort = "high"',
             'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
+            'research_model = "gpt-5.6-luna"',
+            'research_reasoning_effort = "medium"',
+            'finalizer_model = "gpt-5.6-sol"',
+            'finalizer_reasoning_effort = "medium"',
+            "quick_uses_preflight = false",
+            "quick_uses_research = false",
+            "quick_uses_validator = false",
+            "quick_feedback_iterations = 0",
+            "quick_uses_finalizer = false",
+            "routine_uses_preflight = false",
+            "routine_uses_research = false",
+            "routine_uses_validator = false",
+            "routine_feedback_iterations = 0",
+            "routine_uses_finalizer = false",
             "standard_uses_preflight = false",
+            "standard_uses_research = false",
             "standard_uses_validator = true",
             "standard_feedback_iterations = 0",
+            "standard_uses_finalizer = true",
             "deep_uses_preflight = true",
+            "deep_uses_research = false",
             "deep_uses_validator = true",
-            "deep_feedback_iterations = 2",
-            "manuscript_uses_preflight = true",
-            "manuscript_uses_validator = true",
-            "manuscript_feedback_iterations = 2",
+            "deep_feedback_iterations = 1",
+            "deep_uses_finalizer = true",
+            "high_assurance_uses_preflight = true",
+            "high_assurance_uses_research = true",
+            "high_assurance_uses_validator = true",
+            "high_assurance_feedback_iterations = 2",
+            "high_assurance_uses_finalizer = true",
             "poll_timeout_seconds = 30",
             "task_timeout_seconds = 1800",
             "queue_size = 20",
