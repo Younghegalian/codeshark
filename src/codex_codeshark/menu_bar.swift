@@ -969,12 +969,12 @@ struct ModelUsageView: View {
 
             Divider()
 
-            Text("Standard API list-price equivalent; excludes tool, long-context, priority, and regional adjustments. ChatGPT/Codex plan quota is separate.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            HStack {
-                Spacer()
+            HStack(alignment: .center, spacing: 16) {
+                Text("Standard API list-price equivalent; excludes tool, long-context, priority, and regional adjustments. ChatGPT/Codex plan quota is separate.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                Spacer(minLength: 12)
                 Button("Close", action: close)
                     .buttonStyle(.bordered)
             }
