@@ -1016,11 +1016,12 @@ struct ModelUsageView: View {
                     .frame(minWidth: 84, minHeight: 30)
             }
             .frame(maxWidth: .infinity, minHeight: 30, alignment: .trailing)
+            .padding(.bottom, 12)
 
         }
         .padding(16)
         .frame(minWidth: 560, idealWidth: 580, maxWidth: .infinity,
-               minHeight: 760, idealHeight: 780, maxHeight: .infinity,
+               minHeight: 712, idealHeight: 732, maxHeight: .infinity,
                alignment: .top)
     }
 }
@@ -1646,13 +1647,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 780),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 732),
             styleMask: [.titled, .closable, .utilityWindow, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Codeshark Model Usage"
-        panel.minSize = NSSize(width: 560, height: 760)
+        panel.minSize = NSSize(width: 560, height: 712)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.delegate = self
