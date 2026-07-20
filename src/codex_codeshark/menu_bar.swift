@@ -690,7 +690,14 @@ struct ModelUsageView: View {
                 .font(.subheadline.weight(.semibold))
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 11) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(minimum: 0), spacing: 8),
+                        GridItem(.flexible(minimum: 0), spacing: 8),
+                    ],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
                     if groups.isEmpty {
                         Label("No recorded model phases", systemImage: "chart.bar")
                             .font(.subheadline)
@@ -717,7 +724,8 @@ struct ModelUsageView: View {
                                     .foregroundStyle(.secondary)
                                 ProgressView(value: totalTokens > 0 ? Double(group.totalTokens) / Double(totalTokens) : 0)
                             }
-                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(9)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
@@ -736,7 +744,8 @@ struct ModelUsageView: View {
             }
         }
         .padding(16)
-        .frame(width: 450, height: 500)
+        .frame(minWidth: 560, idealWidth: 580, maxWidth: .infinity,
+               minHeight: 640, idealHeight: 680, maxHeight: .infinity)
     }
 }
 
@@ -1358,12 +1367,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 410),
-            styleMask: [.titled, .closable, .utilityWindow],
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 680),
+            styleMask: [.titled, .closable, .utilityWindow, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Codeshark Model Usage"
+        panel.minSize = NSSize(width: 560, height: 640)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.delegate = self
