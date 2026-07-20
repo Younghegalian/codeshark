@@ -837,17 +837,12 @@ struct ModelUsageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Model Usage")
-                        .font(.headline)
-                    Text("Shared account quota + Codeshark-only turn telemetry.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 12)
-                Button("Close", action: close)
-                    .buttonStyle(.bordered)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Model Usage")
+                    .font(.headline)
+                Text("Shared account quota + Codeshark-only turn telemetry.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
 
             if let accountUsage = model.snapshot.accountUsage {
@@ -1003,6 +998,15 @@ struct ModelUsageView: View {
                     }
                 }
             }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Close", action: close)
+                    .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
 
         }
         .padding(16)
