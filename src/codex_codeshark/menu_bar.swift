@@ -734,8 +734,24 @@ struct ModelUsageView: View {
     @State private var period = 0
     @State private var breakdown = 0
 
+    private func routingKey(model: String, reasoningEffort: String) -> String {
+        "\(model)-\(reasoningEffort)"
+    }
+
+    private var routedModelKeys: Set<String> {
+        Set(
+            model.snapshot.modelAssignments.map {
+                routingKey(model: $0.model, reasoningEffort: $0.reasoningEffort)
+            }
+        )
+    }
+
     private var entries: [DashboardModelUsage] {
-        period == 0 ? model.snapshot.modelUsage5h : model.snapshot.modelUsage7d
+        let source = period == 0 ? model.snapshot.modelUsage5h : model.snapshot.modelUsage7d
+        guard !routedModelKeys.isEmpty else { return source }
+        return source.filter {
+            routedModelKeys.contains(routingKey(model: $0.model, reasoningEffort: $0.reasoningEffort))
+        }
     }
 
     private var projectEntries: [DashboardProjectUsage] {
@@ -796,6 +812,22 @@ struct ModelUsageView: View {
         Dictionary(grouping: projectEntries, by: \.project)
             .map { ProjectUsageGroup(project: $0.key, entries: $0.value) }
             .sorted { $0.totalTokens == $1.totalTokens ? $0.project < $1.project : $0.totalTokens > $1.totalTokens }
+    }
+
+    private var projectTotalTokens: Int {
+        projectGroups.reduce(0) { $0 + $1.totalTokens }
+    }
+
+    private var projectEstimatedAPICost: Double {
+        projectGroups.reduce(0) { $0 + ($1.estimatedAPICost ?? 0) }
+    }
+
+    private var displayedTotalTokens: Int {
+        breakdown == 0 ? totalTokens : projectTotalTokens
+    }
+
+    private var displayedAPICost: Double {
+        breakdown == 0 ? estimatedAPICost : projectEstimatedAPICost
     }
 
     private var unpricedModels: [String] {
@@ -870,7 +902,7 @@ struct ModelUsageView: View {
                     Text("TOTAL TOKENS")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(tokenText(totalTokens))
+                    Text(tokenText(displayedTotalTokens))
                         .font(.subheadline.weight(.semibold))
                 }
                 Spacer()
@@ -878,7 +910,7 @@ struct ModelUsageView: View {
                     Text("API-EQUIVALENT")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text(apiCostText(estimatedAPICost))
+                    Text(apiCostText(displayedAPICost))
                         .font(.subheadline.monospacedDigit().weight(.semibold))
                 }
             }
@@ -972,12 +1004,6 @@ struct ModelUsageView: View {
                 }
             }
 
-            Divider()
-
-            Text("Standard API list-price equivalent; excludes tool, long-context, priority, and regional adjustments. ChatGPT/Codex plan quota is separate.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(2)
         }
         .padding(16)
         .frame(minWidth: 560, idealWidth: 580, maxWidth: .infinity,
