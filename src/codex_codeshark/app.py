@@ -7,7 +7,7 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -236,6 +236,8 @@ class CompletedTask:
 class ActiveTask:
     task: TaskRecord
     runner: CodexRunner
+    phase: str = "Starting"
+    started_at: float = field(default_factory=time.time)
 
 
 @dataclass(frozen=True)
@@ -395,19 +397,101 @@ class AgentApp:
     def _write_menu_status(self, active_task_count: int) -> None:
         """Publish only non-sensitive activity for the local menu bar companion."""
         try:
+            with self._status_lock:
+                active_tasks = tuple(self._active_tasks.values())
+            now = time.time()
+            active_summary = []
+            for active in active_tasks:
+                project = (
+                    DEFAULT_PROJECT
+                    if active.task.restricted
+                    else unpack_project_task(active.task.prompt)[0]
+                )
+                active_summary.append(
+                    {
+                        "id": active.task.id,
+                        "project": project,
+                        "phase": active.phase,
+                        "model": getattr(active.runner, "model", None) or "Codex default",
+                        "reasoning_effort": (
+                            getattr(active.runner, "model_reasoning_effort", None)
+                            or "default"
+                        ),
+                        "elapsed_seconds": max(0, int(now - active.started_at)),
+                    }
+                )
+            latest_failure = self.store.latest_failure()
+            model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
                 json.dumps(
                     {
-                        "active_task_count": active_task_count,
-                        "state": "working" if active_task_count else "idle",
-                        "updated_at": int(time.time()),
+                        "active_task_count": len(active_tasks),
+                        "state": "working" if active_tasks else "idle",
+                        "queue_count": self.store.pending_count(),
+                        "active_tasks": active_summary,
+                        "recent_artifacts": self.store.recent_artifact_names(),
+                        "last_failure": (
+                            {
+                                "task_id": latest_failure.task_id,
+                                "message": latest_failure.message,
+                                "finished_at": int(latest_failure.finished_at),
+                            }
+                            if latest_failure is not None
+                            else None
+                        ),
+                        "model_usage": [
+                            {
+                                "model": summary.model,
+                                "reasoning_effort": summary.reasoning_effort,
+                                "phase": summary.phase,
+                                "runs": summary.runs,
+                                "completed": summary.completed,
+                                "elapsed_seconds": round(summary.elapsed_seconds, 1),
+                            }
+                            for summary in model_usage[:4]
+                        ],
+                        "updated_at": int(now),
                     },
                     separators=(",", ":"),
                 ),
             )
         except Exception:
             LOGGER.warning("could not update the menu bar status", exc_info=True)
+
+    def _set_active_task_phase(
+        self,
+        task_id: str,
+        runner: CodexRunner,
+        phase: str,
+    ) -> None:
+        with self._status_lock:
+            active = self._active_tasks.get(task_id)
+            if active is None:
+                return
+            self._active_tasks[task_id] = replace(active, runner=runner, phase=phase)
+            active_task_count = len(self._active_tasks)
+        self._write_menu_status(active_task_count)
+
+    @staticmethod
+    def _dashboard_phase(phase: str) -> str:
+        labels = {
+            "preflight": "Planning",
+            "primary": "Primary task",
+            "validator": "Independent validation",
+            "feedback-verifier": "Verification pass",
+            "rework": "Applying corrections",
+            "reconciliation": "Final synthesis",
+            "finalization": "Finalizing delivery",
+            "session-summary": "Session handoff",
+            "validation-recovery": "Validation recovery",
+            "feedback-recovery": "Verification recovery",
+            "feedback-exhausted": "Finishing after review limit",
+            "focused": "Focused task",
+            "figure-revision": "Figure revision",
+            "direct": "Direct task",
+        }
+        return labels.get(phase, phase.replace("-", " ").title())
 
     def _ensure_cross_validation_skill(self) -> None:
         self.skills.add(_CROSS_VALIDATION_SKILL_NAME, _CROSS_VALIDATION_SKILL_CONTENT)
@@ -2145,6 +2229,8 @@ class AgentApp:
         approved: bool = False,
         full_access: bool = False,
     ) -> RunResult:
+        if task_id is not None:
+            self._set_active_task_phase(task_id, runner, self._dashboard_phase(phase))
         started_at = time.time()
         result = runner.run(
             prompt,

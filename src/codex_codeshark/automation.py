@@ -92,6 +92,13 @@ class ModelRunSummary:
 
 
 @dataclass(frozen=True)
+class TaskFailure:
+    task_id: str
+    message: str
+    finished_at: float
+
+
+@dataclass(frozen=True)
 class GuardrailCandidate:
     id: str
     source_task_id: str
@@ -698,6 +705,53 @@ class AgentStore:
             )
             for row in rows
         ]
+
+    def recent_artifact_names(self, *, limit: int = 3) -> tuple[str, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT artifacts_json FROM task_manifests
+                WHERE artifacts_json != '[]'
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (max(1, limit * 2),),
+            ).fetchall()
+        names: list[str] = []
+        for row in rows:
+            try:
+                artifacts = json.loads(row["artifacts_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(artifacts, list):
+                continue
+            for artifact in artifacts:
+                if isinstance(artifact, str) and artifact:
+                    name = Path(artifact).name
+                    if name and name not in names:
+                        names.append(name)
+                if len(names) >= limit:
+                    return tuple(names)
+        return tuple(names)
+
+    def latest_failure(self) -> TaskFailure | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, error, finished_at FROM tasks
+                WHERE status = 'failed' AND finished_at IS NOT NULL
+                ORDER BY finished_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        message = " ".join(str(row["error"]).split())[:180]
+        return TaskFailure(
+            task_id=row["id"],
+            message=message or "Task failed without a diagnostic message.",
+            finished_at=row["finished_at"],
+        )
 
     def record_artifact_receipt(
         self,

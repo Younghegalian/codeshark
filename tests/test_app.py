@@ -630,6 +630,57 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.app.store.pending_count(), 1)
         self.assertEqual(self.api.messages, [])
 
+    def test_menu_status_publishes_safe_dashboard_data(self) -> None:
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: Private Project]]\nsecret request text",
+            source="telegram",
+            ephemeral=False,
+        )
+        task = self.app.store.claim_next_task()
+        with self.app._status_lock:
+            self.app._active_tasks[task.id] = ActiveTask(
+                task,
+                self.app.runner,
+                phase="Primary task",
+                started_at=time.time() - 70,
+            )
+        self.app.store.upsert_task_manifest(
+            task.id,
+            project="Private Project",
+            tier="standard",
+            phase="completed",
+            artifacts=("/safe/root/final-report.pdf",),
+        )
+        self.app.store.record_model_run(
+            task_id=task.id,
+            phase="primary",
+            model="gpt-5.6-sol",
+            reasoning_effort="high",
+            started_at=time.time() - 12,
+            finished_at=time.time(),
+            exit_code=0,
+            cancelled=False,
+            timed_out=False,
+        )
+        failed = self.app.store.enqueue_task(456, "check", source="telegram", ephemeral=False)
+        failed = self.app.store.claim_next_task()
+        self.app.store.finish_task(failed.id, "failed", "brief diagnostic")
+
+        self.app._write_menu_status(1)
+
+        payload = json.loads(
+            (self.config.state_path.parent / "menu-status.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(payload["state"], "working")
+        self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
+        self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
+        self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
+        self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
+        self.assertEqual(payload["last_failure"]["message"], "brief diagnostic")
+        self.assertEqual(payload["model_usage"][0]["model"], "gpt-5.6-sol")
+        self.assertNotIn("secret request text", json.dumps(payload))
+
     def test_private_follow_up_steers_an_active_safe_task(self) -> None:
         runner = FakeCodexRunner()
         task = self.app.store.enqueue_task(
