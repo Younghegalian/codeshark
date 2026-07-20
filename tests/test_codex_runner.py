@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from codex_codeshark.codex_runner import CodexRunner, parse_codex_events, parse_token_usage
+from codex_codeshark.codex_runner import CodexRunner, RunResult, parse_codex_events, parse_token_usage
 
 
 class CodexRunnerTests(unittest.TestCase):
@@ -185,6 +185,46 @@ class CodexRunnerTests(unittest.TestCase):
         self.assertEqual(retry_thread_id, "thread-1")
         self.assertIn("timeout_ms", retry_prompt)
         self.assertIn("10000", retry_prompt)
+
+    def test_retries_transient_app_server_failure_before_turn_start(self) -> None:
+        rejected = RunResult(
+            exit_code=1,
+            message="",
+            thread_id=None,
+            stderr="HTTP 451: no_biscuit_no_service",
+        )
+        completed = RunResult(
+            exit_code=0,
+            message="done",
+            thread_id="thread-1",
+            stderr="",
+            turn_started=True,
+        )
+        with patch.object(
+            self.runner,
+            "_run_app_server",
+            side_effect=[rejected, completed],
+        ) as run:
+            result = self.runner.run("repair the figure", None)
+
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(run.call_args.args[:2], ("repair the figure", None))
+        self.assertTrue(result.startup_retried)
+        self.assertEqual(result.message, "done")
+
+    def test_does_not_retry_transient_failure_after_turn_start(self) -> None:
+        failed = RunResult(
+            exit_code=1,
+            message="",
+            thread_id="thread-1",
+            stderr="HTTP 451: no_biscuit_no_service",
+            turn_started=True,
+        )
+        with patch.object(self.runner, "_run_app_server", return_value=failed) as run:
+            result = self.runner.run("repair the figure", None)
+
+        self.assertIs(result, failed)
+        self.assertEqual(run.call_count, 1)
 
     def test_retries_ephemeral_run_after_rejected_tool_timeout(self) -> None:
         rejected = SimpleNamespace(

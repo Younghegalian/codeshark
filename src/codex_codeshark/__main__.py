@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from .app import AgentApp
+from .automation import AgentStore
 from .config import (
     ConfigError,
     ORCHESTRATION_TIERS,
@@ -65,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     local_send = commands.add_parser("local-send", help=argparse.SUPPRESS)
     local_send.add_argument("--text", default="")
     local_send.add_argument("--file", action="append", type=Path, default=[])
+    retry_task = commands.add_parser("retry-task", help=argparse.SUPPRESS)
+    retry_task.add_argument("task_id")
     workspace = commands.add_parser("set-workspace", help="set the Codeshark workspace directory")
     workspace.add_argument("directory", type=Path)
     models = commands.add_parser("set-models", help="set the role-specific Codeshark models")
@@ -203,6 +206,16 @@ def main() -> int:
                     ensure_ascii=False,
                 )
             )
+            return 0
+        if args.command == "retry-task":
+            config = load_config()
+            store = AgentStore(config.state_path.parent / "agent.db")
+            if store.pending_count() >= config.queue_size:
+                raise ValueError("the task queue is full")
+            task = store.retry_failed_task(args.task_id)
+            if task is None:
+                raise ValueError("this task is no longer eligible for a safe retry")
+            print(json.dumps({"task_id": task.id}, ensure_ascii=False))
             return 0
         if args.command in {"start", "stop", "restart", "service-status"}:
             if args.command == "start":

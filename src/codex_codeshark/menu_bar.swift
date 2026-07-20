@@ -19,10 +19,12 @@ struct DashboardTask: Decodable, Identifiable {
 struct DashboardFailure: Decodable {
     let taskID: String
     let message: String
+    let retryAvailable: Bool?
 
     enum CodingKeys: String, CodingKey {
         case taskID = "task_id"
         case message
+        case retryAvailable = "retry_available"
     }
 }
 
@@ -1353,6 +1355,7 @@ struct ProjectOverviewView: View {
 struct AttentionView: View {
     @ObservedObject var model: DashboardModel
     let showLogs: () -> Void
+    let retryTask: (String) -> Void
     let close: () -> Void
 
     private var snapshot: DashboardSnapshot { model.snapshot }
@@ -1388,6 +1391,23 @@ struct AttentionView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
+                                HStack(spacing: 8) {
+                                    Button("Retry") {
+                                        retryTask(failure.taskID)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                    .disabled(failure.retryAvailable != true)
+                                    if failure.retryAvailable == true {
+                                        Text("safe startup retry")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Text("retry unavailable after task start")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -2875,6 +2895,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             rootView: AttentionView(
                 model: dashboard,
                 showLogs: { [weak self] in self?.showLogs() },
+                retryTask: { [weak self] taskID in self?.retryTask(taskID) },
                 close: { [weak self] in self?.attentionPanel?.close() }
             )
         )
@@ -2882,6 +2903,15 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         attentionPanel = panel
+    }
+
+    private func retryTask(_ taskID: String) {
+        let result = executeServiceCommand(["retry-task", taskID])
+        if result.status != 0 {
+            showError(result.output.isEmpty ? "This task can no longer be retried safely." : result.output)
+            return
+        }
+        dashboard.refresh()
     }
 
     private func showLogs() {

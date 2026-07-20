@@ -1533,10 +1533,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
-        self.assertEqual(
-            self.api.messages[-1],
-            (group_id, "The restricted Codex task failed. Ask the administrator to check local logs."),
-        )
+        self.assertIn("restricted task stopped", self.api.messages[-1][1])
         self.assertNotIn("sensitive", self.api.messages[-1][1])
 
     def test_administrator_failure_does_not_disclose_codex_stderr(self) -> None:
@@ -1552,12 +1549,30 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         task = self.app.store.claim_next_task()
         self.app._execute_task(task)
 
-        self.assertEqual(
-            self.api.messages[-1],
-            (123, "Codeshark could not complete this task. Check the local logs and retry."),
-        )
+        self.assertIn("작업을 완료하지 못했습니다", self.api.messages[-1][1])
+        self.assertIn(task.id, self.api.messages[-1][1])
         self.assertEqual(self.api.message_replies[-1], 73)
         self.assertNotIn("sensitive", self.api.messages[-1][1])
+
+    def test_administrator_failure_reports_safe_retry_in_attention(self) -> None:
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=1,
+                message="",
+                thread_id=None,
+                stderr="HTTP 451: no_biscuit_no_service; secret detail",
+                startup_retried=True,
+            )
+        )
+        self.app._handle_update(self.update(123, "do work"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        message = self.api.messages[-1][1]
+        self.assertIn("HTTP 451", message)
+        self.assertIn("Attention에서 Retry", message)
+        self.assertIn(task.id, message)
+        self.assertNotIn("secret detail", message)
 
     def test_task_sends_only_the_final_result(self) -> None:
         self.app.runner = FakeCodexRunner()

@@ -718,6 +718,7 @@ class AgentApp:
                                 "task_id": latest_failure.task_id,
                                 "message": latest_failure.message,
                                 "finished_at": int(latest_failure.finished_at),
+                                "retry_available": latest_failure.retry_available,
                             }
                             if latest_failure is not None
                             else None
@@ -1770,6 +1771,12 @@ class AgentApp:
             )
         result = replace(result, message=clean_message)
         if (
+            not successful
+            and result.startup_retried
+            and not result.turn_started
+        ):
+            self.store.save_safe_retry_payload(task)
+        if (
             successful
             and task.restricted
             and task.requester_id is not None
@@ -1981,16 +1988,17 @@ class AgentApp:
             )
             return
         if result.exit_code != 0:
-            if restricted:
-                self._send_message(
-                    chat_id,
-                    "The restricted Codex task failed. Ask the administrator to check local logs.",
-                    reply_to_message_id=reply_to_message_id,
-                )
-                return
+            message = self._failure_message(result, task_id=task_id, restricted=restricted)
+            LOGGER.warning(
+                "task failed id=%s exit_code=%s kind=%s startup_retried=%s",
+                task_id or "untracked",
+                result.exit_code,
+                self._failure_kind(result),
+                result.startup_retried,
+            )
             self._send_message(
                 chat_id,
-                "Codeshark could not complete this task. Check the local logs and retry.",
+                message,
                 reply_to_message_id=reply_to_message_id,
             )
             return
@@ -2026,7 +2034,7 @@ class AgentApp:
         elif result.timed_out:
             text = "The task exceeded its time limit and was stopped."
         elif result.exit_code != 0:
-            text = "Codeshark could not complete this task. Check the local logs and retry."
+            text = self._failure_message(result, task_id=task_id, restricted=False)
         else:
             text = result.message or "Codex completed the task without a text response."
         self.store.append_local_message(
@@ -2035,6 +2043,56 @@ class AgentApp:
             task_id=task_id,
             attachments=tuple(str(path) for path in documents),
         )
+
+    @staticmethod
+    def _failure_kind(result: RunResult) -> str:
+        diagnostic = result.stderr.casefold()
+        if "no_biscuit_no_service" in diagnostic or "http 451" in diagnostic:
+            return "codex-service-unavailable"
+        if "rate limit" in diagnostic or "too many requests" in diagnostic or "http 429" in diagnostic:
+            return "rate-limited"
+        if any(term in diagnostic for term in ("authentication", "unauthorized", "not logged", "login")):
+            return "authentication"
+        if any(term in diagnostic for term in ("connection refused", "connection reset", "temporarily unavailable")):
+            return "connection"
+        if result.exit_code < 0:
+            return "runner-exited"
+        return "runner-failed"
+
+    def _failure_message(
+        self,
+        result: RunResult,
+        *,
+        task_id: str | None,
+        restricted: bool,
+    ) -> str:
+        if restricted:
+            return (
+                "The restricted task stopped before completion. Its internal diagnostics "
+                "remain isolated; the administrator can inspect the local task record."
+            )
+        kind = self._failure_kind(result)
+        cause = {
+            "codex-service-unavailable": "Codex 서비스가 연결을 거부했습니다 (HTTP 451).",
+            "rate-limited": "Codex 사용량 제한 또는 일시적인 요청 제한에 걸렸습니다.",
+            "authentication": "Codex 로그인 또는 인증 상태를 확인해야 합니다.",
+            "connection": "Codex 서비스와의 연결이 일시적으로 끊겼습니다.",
+            "runner-exited": "Codex 실행 프로세스가 예기치 않게 종료되었습니다.",
+            "runner-failed": "Codex 실행이 결과를 반환하기 전에 실패했습니다.",
+        }[kind]
+        if result.startup_retried and not result.turn_started:
+            retry = " 시작 전에 안전 재시도를 1회 했지만 계속 실패했습니다. 원래 작업은 실행되지 않았습니다."
+        elif result.startup_retried:
+            retry = " 시작 단계 오류 뒤에 재시도했지만, 재시도 작업도 완료되지 않았습니다."
+        else:
+            retry = ""
+        attention = (
+            " Attention에서 Retry를 누르면 같은 요청을 새 작업으로 다시 넣을 수 있습니다."
+            if task_id and self.store.has_safe_retry(task_id)
+            else ""
+        )
+        record = f" 작업 ID: {task_id}." if task_id else ""
+        return f"작업을 완료하지 못했습니다: {cause}{retry}{record}{attention} 상세 진단은 Codeshark Logs에 기록했습니다."
 
     def _set_manifest_delivery(
         self,

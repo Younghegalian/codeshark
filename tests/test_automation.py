@@ -47,6 +47,23 @@ class AgentStoreTests(unittest.TestCase):
 
             self.assertIsNone(store.latest_failure())
 
+    def test_safe_startup_retry_queues_a_fresh_copy_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            task = store.enqueue_task(123, "original request", source="telegram", ephemeral=False)
+            running = store.claim_next_task(now=task.created_at + 1)
+            self.assertTrue(store.save_safe_retry_payload(running))
+            self.assertTrue(store.finish_task(running.id, "failed", "HTTP 451"))
+            self.assertTrue(store.has_safe_retry(running.id))
+
+            retry = store.retry_failed_task(running.id)
+
+            self.assertIsNotNone(retry)
+            self.assertNotEqual(retry.id, running.id)
+            self.assertEqual(retry.prompt, "original request")
+            self.assertEqual(retry.status, "queued")
+            self.assertFalse(store.has_safe_retry(running.id))
+
     def test_summarizes_model_runs_in_a_requested_time_window(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")

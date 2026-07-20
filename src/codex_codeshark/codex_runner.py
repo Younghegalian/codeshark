@@ -9,7 +9,7 @@ import signal
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,9 @@ class RunResult:
     cancelled: bool = False
     timed_out: bool = False
     token_usage: "TokenUsage | None" = None
+    # A startup failure is safe to retry because Codex never accepted a turn.
+    turn_started: bool = False
+    startup_retried: bool = False
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,12 @@ def parse_codex_events(output: str) -> tuple[str, str | None]:
 class CodexRunner:
     _TOOL_TIMEOUT_VALIDATION_ERROR = re.compile(
         r"timeout_ms must be at least 10000", re.IGNORECASE
+    )
+    _STARTUP_RETRYABLE_ERROR = re.compile(
+        r"(?:no_biscuit_no_service|unexpected server response:\s*HTTP\s*"
+        r"(?:429|451|5\d\d)|connection (?:refused|reset)|temporarily unavailable|"
+        r"app-server closed its protocol stream|broken pipe)",
+        re.IGNORECASE,
     )
     _CHILD_ENV_ALLOWLIST = {
         "CODEX_HOME",
@@ -541,14 +550,22 @@ class CodexRunner:
                 approved=approved,
                 full_access=full_access,
             )
-            if not self._requires_timeout_retry(result):
-                return result
-            return self._run_app_server(
-                self._timeout_retry_prompt(prompt, resumed=result.thread_id is not None),
-                result.thread_id,
-                approved=approved,
-                full_access=full_access,
-            )
+            if self._requires_timeout_retry(result):
+                return self._run_app_server(
+                    self._timeout_retry_prompt(prompt, resumed=result.thread_id is not None),
+                    result.thread_id,
+                    approved=approved,
+                    full_access=full_access,
+                )
+            if self._requires_startup_retry(result):
+                recovered = self._run_app_server(
+                    prompt,
+                    result.thread_id or thread_id,
+                    approved=approved,
+                    full_access=full_access,
+                )
+                return replace(recovered, startup_retried=True)
+            return result
         result = self._run_exec(
             prompt,
             thread_id,
@@ -576,6 +593,17 @@ class CodexRunner:
             and not result.cancelled
             and not result.timed_out
             and bool(cls._TOOL_TIMEOUT_VALIDATION_ERROR.search(result.stderr))
+        )
+
+    @classmethod
+    def _requires_startup_retry(cls, result: RunResult) -> bool:
+        """Retry only failures that happened before Codex accepted a user turn."""
+        return (
+            result.exit_code != 0
+            and not result.cancelled
+            and not result.timed_out
+            and not getattr(result, "turn_started", True)
+            and bool(cls._STARTUP_RETRYABLE_ERROR.search(result.stderr))
         )
 
     @staticmethod
@@ -679,6 +707,7 @@ class CodexRunner:
         timed_out = False
         exit_code = 1
         error_message = ""
+        turn_started = False
         with self._lock:
             self._cancel_requested = False
             self._process = process
@@ -748,6 +777,7 @@ class CodexRunner:
             if "error" in turn_response:
                 error_message = self._server_error(turn_response)
                 return RunResult(1, "", active_thread_id, error_message)
+            turn_started = True
             returned_turn = turn_response.get("result", {}).get("turn", {}).get("id")
             if not isinstance(returned_turn, str):
                 return RunResult(1, "", active_thread_id, "Codex app-server did not return a turn ID")
@@ -823,6 +853,7 @@ class CodexRunner:
             cancelled=cancelled,
             timed_out=timed_out,
             token_usage=token_usage,
+            turn_started=turn_started,
         )
 
     def steer(self, prompt: str) -> bool:

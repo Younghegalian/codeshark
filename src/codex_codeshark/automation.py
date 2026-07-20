@@ -151,6 +151,7 @@ class TaskFailure:
     task_id: str
     message: str
     finished_at: float
+    retry_available: bool
 
 
 @dataclass(frozen=True)
@@ -377,6 +378,13 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS tasks_ready
                     ON tasks(status, due_at, created_at);
+                CREATE TABLE IF NOT EXISTS task_retry_payloads (
+                    task_id TEXT PRIMARY KEY,
+                    prompt TEXT NOT NULL,
+                    expires_at REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS task_retry_payloads_expiry
+                    ON task_retry_payloads(expires_at);
                 CREATE TABLE IF NOT EXISTS schedules (
                     id TEXT PRIMARY KEY,
                     chat_id INTEGER NOT NULL,
@@ -1035,15 +1043,20 @@ class AgentStore:
         with self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT id, error, finished_at FROM tasks
-                WHERE status = 'failed' AND finished_at IS NOT NULL
-                  AND finished_at >= COALESCE(
+                SELECT tasks.id, tasks.error, tasks.finished_at,
+                       retry_payloads.task_id IS NOT NULL AS retry_available
+                FROM tasks
+                LEFT JOIN task_retry_payloads AS retry_payloads
+                  ON retry_payloads.task_id = tasks.id AND retry_payloads.expires_at >= ?
+                WHERE tasks.status = 'failed' AND tasks.finished_at IS NOT NULL
+                  AND tasks.finished_at >= COALESCE(
                       (SELECT MAX(finished_at) FROM tasks WHERE status = 'completed'),
                       0
                   )
-                ORDER BY finished_at DESC
+                ORDER BY tasks.finished_at DESC
                 LIMIT 1
-                """
+                """,
+                (time.time(),),
             ).fetchone()
         if row is None:
             return None
@@ -1052,6 +1065,7 @@ class AgentStore:
             task_id=row["id"],
             message=message or "Task failed without a diagnostic message.",
             finished_at=row["finished_at"],
+            retry_available=bool(row["retry_available"]),
         )
 
     def record_artifact_receipt(
@@ -1237,6 +1251,77 @@ class AgentStore:
             )
             self._prune_tasks(connection)
             return cursor.rowcount == 1
+
+    def save_safe_retry_payload(
+        self,
+        task: TaskRecord,
+        *,
+        expires_seconds: int = 24 * 60 * 60,
+    ) -> bool:
+        """Keep one short-lived copy only for a turn that never started."""
+        if task.restricted or task.ephemeral or not task.prompt:
+            return False
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "DELETE FROM task_retry_payloads WHERE expires_at < ?",
+                (time.time(),),
+            )
+            cursor = connection.execute(
+                """
+                INSERT INTO task_retry_payloads (task_id, prompt, expires_at)
+                SELECT id, ?, ? FROM tasks
+                WHERE id = ? AND status = 'running' AND restricted = 0 AND ephemeral = 0
+                ON CONFLICT(task_id) DO UPDATE SET prompt = excluded.prompt, expires_at = excluded.expires_at
+                """,
+                (task.prompt, time.time() + max(60, expires_seconds), task.id),
+            )
+        return cursor.rowcount == 1
+
+    def has_safe_retry(self, task_id: str) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM task_retry_payloads WHERE task_id = ? AND expires_at >= ?",
+                (task_id, time.time()),
+            ).fetchone()
+        return row is not None
+
+    def retry_failed_task(self, task_id: str) -> TaskRecord | None:
+        """Queue a fresh task from a locally saved, pre-turn failure payload."""
+        with self._lock, self._connect() as connection:
+            task = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if task is None or task["status"] != "failed" or task["restricted"] or task["ephemeral"]:
+                return None
+            payload = connection.execute(
+                "SELECT prompt FROM task_retry_payloads WHERE task_id = ? AND expires_at >= ?",
+                (task_id, time.time()),
+            ).fetchone()
+            if payload is None:
+                return None
+            retry_id = "t" + uuid.uuid4().hex[:10]
+            now = time.time()
+            connection.execute(
+                """
+                INSERT INTO tasks
+                    (id, chat_id, prompt, source, ephemeral, status, created_at, due_at,
+                     approved, restricted, requester_id, reply_to_message_id)
+                VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, 0, ?, ?)
+                """,
+                (
+                    retry_id,
+                    task["chat_id"],
+                    payload["prompt"],
+                    task["source"],
+                    task["ephemeral"],
+                    now,
+                    now,
+                    task["approved"],
+                    task["requester_id"],
+                    task["reply_to_message_id"],
+                ),
+            )
+            connection.execute("DELETE FROM task_retry_payloads WHERE task_id = ?", (task_id,))
+            row = connection.execute("SELECT * FROM tasks WHERE id = ?", (retry_id,)).fetchone()
+        return self._task(row)
 
     def approve(self, item_id: str, *, now: float | None = None) -> bool:
         current = time.time() if now is None else now
