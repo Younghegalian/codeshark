@@ -33,6 +33,20 @@ class RiskPolicyTests(unittest.TestCase):
 
 
 class AgentStoreTests(unittest.TestCase):
+    def test_latest_failure_hides_after_a_later_successful_task(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            failed = store.enqueue_task(123, "first", source="telegram", ephemeral=False)
+            failed = store.claim_next_task(now=failed.created_at + 1)
+            store.finish_task(failed.id, "failed", "first diagnostic")
+            self.assertEqual(store.latest_failure().task_id, failed.id)
+
+            completed = store.enqueue_task(456, "second", source="telegram", ephemeral=False)
+            completed = store.claim_next_task(now=completed.created_at + 2)
+            store.finish_task(completed.id, "completed")
+
+            self.assertIsNone(store.latest_failure())
+
     def test_summarizes_model_runs_in_a_requested_time_window(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = AgentStore(Path(directory) / "agent.db")

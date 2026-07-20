@@ -740,6 +740,10 @@ class AgentStore:
                 """
                 SELECT id, error, finished_at FROM tasks
                 WHERE status = 'failed' AND finished_at IS NOT NULL
+                  AND finished_at >= COALESCE(
+                      (SELECT MAX(finished_at) FROM tasks WHERE status = 'completed'),
+                      0
+                  )
                 ORDER BY finished_at DESC
                 LIMIT 1
                 """
