@@ -846,9 +846,9 @@ struct ModelUsageView: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Model Usage")
-                    .font(.headline)
+                    .font(.system(size: 16, weight: .semibold))
                 Text("Account quota and model usage.")
-                    .font(.subheadline)
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
 
@@ -1006,7 +1006,7 @@ struct ModelUsageView: View {
                 }
             }
 
-            Spacer(minLength: 18)
+            Spacer()
 
             Divider()
 
@@ -1016,7 +1016,7 @@ struct ModelUsageView: View {
                     .buttonStyle(.bordered)
                     .frame(minWidth: 84, minHeight: 30)
             }
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .trailing)
+            .frame(maxWidth: .infinity, minHeight: 30, alignment: .trailing)
 
         }
         .padding(16)
@@ -1248,7 +1248,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 520),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -1260,25 +1260,25 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Model Routing")
-        title.font = .systemFont(ofSize: 17, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 547, width: 580, height: 24)
+        title.font = .systemFont(ofSize: 16, weight: .semibold)
+        title.frame = NSRect(x: 16, y: 484, width: 588, height: 20)
         content.addSubview(title)
 
         let detail = NSTextField(wrappingLabelWithString: "Choose a model and a supported reasoning effort for each role. Applying restarts Codeshark.")
-        detail.font = .systemFont(ofSize: 13)
+        detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 505, width: 580, height: 34)
+        detail.frame = NSRect(x: 16, y: 452, width: 588, height: 18)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
-        modelHeader.font = .systemFont(ofSize: 11, weight: .semibold)
+        modelHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 185, y: 478, width: 235, height: 16)
+        modelHeader.frame = NSRect(x: 170, y: 426, width: 245, height: 14)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
-        effortHeader.font = .systemFont(ofSize: 11, weight: .semibold)
+        effortHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 430, y: 478, width: 170, height: 16)
+        effortHeader.frame = NSRect(x: 425, y: 426, width: 179, height: 14)
         content.addSubview(effortHeader)
 
         let roles = [
@@ -1295,10 +1295,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         modelPickers = [:]
         reasoningPickers = [:]
         for (index, role) in roles.enumerated() {
-            let y = 425 - (index * 48)
+            let y = 370 - (index * 39)
             let label = NSTextField(labelWithString: role.0)
-            label.font = .systemFont(ofSize: 13, weight: .medium)
-            label.frame = NSRect(x: 20, y: y + 21, width: 155, height: 18)
+            label.font = .systemFont(ofSize: 12, weight: .medium)
+            label.frame = NSRect(x: 16, y: y + 18, width: 145, height: 16)
             content.addSubview(label)
 
             let assignment = dashboard.snapshot.modelAssignments.first(where: { $0.role == role.1 })
@@ -1307,39 +1307,41 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             let recentUsage = NSTextField(
                 labelWithString: "7d · \(tokenText(assignment?.recentTotalTokens ?? 0)) · \(assignment?.recentMeasuredTurns ?? 0)/\(assignment?.recentRuns ?? 0) turns"
             )
-            recentUsage.font = .systemFont(ofSize: 10)
+            recentUsage.font = .systemFont(ofSize: 9)
             recentUsage.textColor = .secondaryLabelColor
-            recentUsage.frame = NSRect(x: 20, y: y + 4, width: 155, height: 14)
+            recentUsage.frame = NSRect(x: 16, y: y + 3, width: 145, height: 12)
             content.addSubview(recentUsage)
             let modelPicker = modelPicker(
                 current,
                 role: role.1,
-                frame: NSRect(x: 185, y: y + 10, width: 235, height: 28)
+                frame: NSRect(x: 170, y: y + 7, width: 245, height: 26)
             )
             let effortPicker = reasoningPicker(
                 model: current,
                 current: currentEffort,
-                frame: NSRect(x: 430, y: y + 10, width: 170, height: 28)
+                frame: NSRect(x: 425, y: y + 7, width: 179, height: 26)
             )
+            modelPicker.font = .systemFont(ofSize: 12)
+            effortPicker.font = .systemFont(ofSize: 12)
             content.addSubview(modelPicker)
             content.addSubview(effortPicker)
             modelPickers[role.1] = modelPicker
             reasoningPickers[role.1] = effortPicker
         }
 
-        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 580, height: 1))
+        let separator = NSBox(frame: NSRect(x: 16, y: 44, width: 588, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
 
         let close = NSButton(title: "Close", target: self, action: #selector(closeModelRouting))
         close.bezelStyle = .rounded
-        close.frame = NSRect(x: 20, y: 15, width: 90, height: 28)
+        close.frame = NSRect(x: 16, y: 10, width: 84, height: 26)
         content.addSubview(close)
 
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyModelRouting))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 510, y: 15, width: 90, height: 28)
+        apply.frame = NSRect(x: 520, y: 10, width: 84, height: 26)
         content.addSubview(apply)
 
         panel.contentView = content
@@ -1464,7 +1466,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 390),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 330),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -1476,15 +1478,15 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
 
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Orchestration")
-        title.font = .systemFont(ofSize: 17, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 337, width: 720, height: 24)
+        title.font = .systemFont(ofSize: 16, weight: .semibold)
+        title.frame = NSRect(x: 16, y: 294, width: 728, height: 20)
         content.addSubview(title)
         let detail = NSTextField(
             wrappingLabelWithString: "Quick: one pass. Routine: scoped checks. Review begins at Standard; feedback and finalization require it."
         )
-        detail.font = .systemFont(ofSize: 12)
+        detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 303, width: 720, height: 18)
+        detail.frame = NSRect(x: 16, y: 263, width: 728, height: 16)
         content.addSubview(detail)
 
         for (title, x, width) in [
@@ -1495,9 +1497,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             ("FINALIZER", 675, 90),
         ] {
             let header = NSTextField(labelWithString: title)
-            header.font = .systemFont(ofSize: 11, weight: .semibold)
+            header.font = .systemFont(ofSize: 10, weight: .semibold)
             header.textColor = .secondaryLabelColor
-            header.frame = NSRect(x: CGFloat(x), y: 274, width: CGFloat(width), height: 16)
+            header.frame = NSRect(x: CGFloat(x), y: 235, width: CGFloat(width), height: 14)
             content.addSubview(header)
         }
 
@@ -1514,19 +1516,20 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         orchestrationFeedback = [:]
         orchestrationFinalization = [:]
         for (index, tier) in tiers.enumerated() {
-            let y = 224 - (index * 38)
+            let y = 195 - (index * 30)
             let values = orchestrationValues(for: tier.0)
             let label = NSTextField(labelWithString: tier.1)
-            label.font = .systemFont(ofSize: 14, weight: .medium)
-            label.frame = NSRect(x: 20, y: y + 5, width: 135, height: 22)
+            label.font = .systemFont(ofSize: 12, weight: .medium)
+            label.frame = NSRect(x: 16, y: y + 4, width: 135, height: 18)
             content.addSubview(label)
-            let preflight = checkbox(checked: values.usesPreflight, frame: NSRect(x: 200, y: y + 3, width: 22, height: 22))
-            let research = checkbox(checked: values.usesResearch, frame: NSRect(x: 315, y: y + 3, width: 22, height: 22))
-            let validation = checkbox(checked: values.usesValidator, frame: NSRect(x: 445, y: y + 3, width: 22, height: 22))
-            let feedback = NSPopUpButton(frame: NSRect(x: 560, y: y, width: 70, height: 28), pullsDown: false)
+            let preflight = checkbox(checked: values.usesPreflight, frame: NSRect(x: 200, y: y + 2, width: 20, height: 20))
+            let research = checkbox(checked: values.usesResearch, frame: NSRect(x: 315, y: y + 2, width: 20, height: 20))
+            let validation = checkbox(checked: values.usesValidator, frame: NSRect(x: 445, y: y + 2, width: 20, height: 20))
+            let feedback = NSPopUpButton(frame: NSRect(x: 560, y: y, width: 70, height: 25), pullsDown: false)
+            feedback.font = .systemFont(ofSize: 12)
             feedback.addItems(withTitles: ["0", "1", "2", "3", "4", "5"])
             feedback.selectItem(withTitle: String(values.feedbackIterations))
-            let finalization = checkbox(checked: values.usesFinalizer, frame: NSRect(x: 705, y: y + 3, width: 22, height: 22))
+            let finalization = checkbox(checked: values.usesFinalizer, frame: NSRect(x: 705, y: y + 2, width: 20, height: 20))
             content.addSubview(preflight)
             content.addSubview(research)
             content.addSubview(validation)
@@ -1539,17 +1542,17 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             orchestrationFinalization[tier.0] = finalization
         }
 
-        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 720, height: 1))
+        let separator = NSBox(frame: NSRect(x: 16, y: 42, width: 728, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
         let close = NSButton(title: "Close", target: self, action: #selector(closeOrchestration))
         close.bezelStyle = .rounded
-        close.frame = NSRect(x: 20, y: 15, width: 90, height: 28)
+        close.frame = NSRect(x: 16, y: 9, width: 84, height: 26)
         content.addSubview(close)
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyOrchestration))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 650, y: 15, width: 90, height: 28)
+        apply.frame = NSRect(x: 660, y: 9, width: 84, height: 26)
         content.addSubview(apply)
         panel.contentView = content
         panel.center()
