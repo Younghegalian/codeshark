@@ -683,6 +683,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             },
         )
         self.assertEqual(payload["model_assignments"][3]["role"], "Rework")
+        self.assertEqual(payload["model_assignments"][4]["role"], "Validation")
+        self.assertEqual(payload["model_assignments"][5]["role"], "Feedback")
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
@@ -998,7 +1000,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(remaining), 5)
         self.assertTrue(any("cross validation" in item.name.lower() for item in remaining))
 
-    def test_model_usage_command_reports_execution_proxy_not_quota(self) -> None:
+    def test_model_usage_command_reports_exact_tokens_and_quota_boundary(self) -> None:
         self.app.store.record_model_run(
             task_id="task-1",
             phase="routine",
@@ -1009,14 +1011,22 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             exit_code=0,
             cancelled=False,
             timed_out=False,
+            input_tokens=120,
+            cached_input_tokens=30,
+            cache_write_input_tokens=10,
+            output_tokens=40,
+            reasoning_output_tokens=15,
+            total_tokens=160,
+            token_usage_recorded=True,
         )
 
         self.app._handle_update(self.update(123, "/model_usage"))
 
         text = self.api.messages[-1][1]
-        self.assertIn("execution proxy", text)
+        self.assertIn("exact tokens", text)
         self.assertIn("gpt-5.6-luna (medium), routine", text)
-        self.assertIn("Codex /usage", text)
+        self.assertIn("160 tokens from 1/1 turns", text)
+        self.assertIn("Live account quota", text)
 
     def test_existing_figure_layout_request_loads_the_layout_skill(self) -> None:
         runner = FakeCodexRunner()
@@ -1151,6 +1161,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(self.app._primary_runners), self.config.worker_count)
         self.assertEqual(len(self.app._rework_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._feedback_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         workdirs = {runner.restricted_workdir for runner in self.app._worker_runners}
         homes = {runner.restricted_codex_home for runner in self.app._worker_runners}
@@ -1182,6 +1193,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.validator_model
                 and runner.model_reasoning_effort == self.config.validator_reasoning_effort
                 for runner in self.app._subagent_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.feedback_model
+                and runner.model_reasoning_effort == self.config.feedback_reasoning_effort
+                for runner in self.app._feedback_runners
             )
         )
         self.assertTrue(
@@ -1566,9 +1584,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         validator = FakeCodexRunner(
             RunResult(0, "VERDICT: REWORK\n1. Add the missing check.", "v1", "")
         )
-        validator.results.extend(
+        feedback = FakeCodexRunner(
+            RunResult(0, "VERDICT: REWORK\n1. Fix the remaining edge case.", "v2", "")
+        )
+        feedback.results.extend(
             [
-                RunResult(0, "VERDICT: REWORK\n1. Fix the remaining edge case.", "v2", ""),
                 RunResult(0, "VERDICT: PASS\n1. Pass.", "v3", ""),
             ]
         )
@@ -1582,14 +1602,15 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             ephemeral=False,
         )
 
-        app._execute_task(task, primary, validator, preflight)
+        app._execute_task(task, primary, validator, preflight, feedback_runner=feedback)
 
         self.assertEqual(len(preflight.prompts), 1)
         self.assertIn("preflight", preflight.prompts[0][0])
-        self.assertEqual(len(validator.prompts), 3)
+        self.assertEqual(len(validator.prompts), 1)
         self.assertIn("validator phase", validator.prompts[0][0])
-        self.assertIn("feedback verifier", validator.prompts[1][0])
-        self.assertIn("feedback verifier", validator.prompts[2][0])
+        self.assertEqual(len(feedback.prompts), 2)
+        self.assertIn("feedback verifier", feedback.prompts[0][0])
+        self.assertIn("feedback verifier", feedback.prompts[1][0])
         self.assertEqual(len(primary.prompts), 4)
         self.assertIn("Internal planning brief", primary.prompts[0][0])
         self.assertIn("finalization phase", primary.prompts[-1][0])

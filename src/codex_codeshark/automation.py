@@ -89,6 +89,13 @@ class ModelRunSummary:
     runs: int
     completed: int
     elapsed_seconds: float
+    measured_runs: int
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_input_tokens: int
+    output_tokens: int
+    reasoning_output_tokens: int
+    total_tokens: int
 
 
 @dataclass(frozen=True)
@@ -396,7 +403,14 @@ class AgentStore:
                     elapsed_seconds REAL NOT NULL,
                     exit_code INTEGER NOT NULL,
                     cancelled INTEGER NOT NULL DEFAULT 0,
-                    timed_out INTEGER NOT NULL DEFAULT 0
+                    timed_out INTEGER NOT NULL DEFAULT 0,
+                    token_usage_recorded INTEGER NOT NULL DEFAULT 0,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cached_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS model_runs_recent
                     ON model_runs(finished_at DESC);
@@ -455,6 +469,23 @@ class AgentStore:
                 connection.execute(
                     "ALTER TABLE schedules ADD COLUMN approved INTEGER NOT NULL DEFAULT 0"
                 )
+            model_run_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(model_runs)").fetchall()
+            }
+            for name in (
+                "token_usage_recorded",
+                "input_tokens",
+                "cached_input_tokens",
+                "cache_write_input_tokens",
+                "output_tokens",
+                "reasoning_output_tokens",
+                "total_tokens",
+            ):
+                if name not in model_run_columns:
+                    connection.execute(
+                        f"ALTER TABLE model_runs ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0"
+                    )
             self._prune_tasks(connection)
             self._prune_schedules(connection)
             self._prune_deliveries(connection)
@@ -664,14 +695,23 @@ class AgentStore:
         exit_code: int,
         cancelled: bool,
         timed_out: bool,
+        input_tokens: int = 0,
+        cached_input_tokens: int = 0,
+        cache_write_input_tokens: int = 0,
+        output_tokens: int = 0,
+        reasoning_output_tokens: int = 0,
+        total_tokens: int = 0,
+        token_usage_recorded: bool = False,
     ) -> None:
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO model_runs
                     (task_id, phase, model, reasoning_effort, started_at, finished_at,
-                     elapsed_seconds, exit_code, cancelled, timed_out)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     elapsed_seconds, exit_code, cancelled, timed_out, token_usage_recorded,
+                     input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens,
+                     reasoning_output_tokens, total_tokens)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -684,6 +724,13 @@ class AgentStore:
                     exit_code,
                     int(cancelled),
                     int(timed_out),
+                    int(token_usage_recorded),
+                    max(0, input_tokens),
+                    max(0, cached_input_tokens),
+                    max(0, cache_write_input_tokens),
+                    max(0, output_tokens),
+                    max(0, reasoning_output_tokens),
+                    max(0, total_tokens),
                 ),
             )
 
@@ -699,7 +746,14 @@ class AgentStore:
                 SELECT model, reasoning_effort, phase, COUNT(*) AS runs,
                        SUM(CASE WHEN exit_code = 0 AND cancelled = 0 AND timed_out = 0
                                 THEN 1 ELSE 0 END) AS completed,
-                       SUM(elapsed_seconds) AS elapsed_seconds
+                       SUM(elapsed_seconds) AS elapsed_seconds,
+                       SUM(token_usage_recorded) AS measured_runs,
+                       SUM(input_tokens) AS input_tokens,
+                       SUM(cached_input_tokens) AS cached_input_tokens,
+                       SUM(cache_write_input_tokens) AS cache_write_input_tokens,
+                       SUM(output_tokens) AS output_tokens,
+                       SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+                       SUM(total_tokens) AS total_tokens
                 FROM model_runs
                 {filters}
                 GROUP BY model, reasoning_effort, phase
@@ -715,6 +769,13 @@ class AgentStore:
                 runs=row["runs"],
                 completed=row["completed"],
                 elapsed_seconds=row["elapsed_seconds"],
+                measured_runs=row["measured_runs"],
+                input_tokens=row["input_tokens"],
+                cached_input_tokens=row["cached_input_tokens"],
+                cache_write_input_tokens=row["cache_write_input_tokens"],
+                output_tokens=row["output_tokens"],
+                reasoning_output_tokens=row["reasoning_output_tokens"],
+                total_tokens=row["total_tokens"],
             )
             for row in rows
         ]

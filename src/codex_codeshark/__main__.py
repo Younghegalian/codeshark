@@ -54,6 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--rework-effort", required=True)
     models.add_argument("--validator", required=True)
     models.add_argument("--validator-effort", required=True)
+    models.add_argument("--feedback", required=True)
+    models.add_argument("--feedback-effort", required=True)
     models.add_argument("--preflight", required=True)
     models.add_argument("--preflight-effort", required=True)
     logs = commands.add_parser("logs", help="show sanitized background service logs")
@@ -133,6 +135,8 @@ def main() -> int:
                 rework_reasoning_effort=args.rework_effort,
                 validator_model=args.validator,
                 validator_reasoning_effort=args.validator_effort,
+                feedback_model=args.feedback,
+                feedback_reasoning_effort=args.feedback_effort,
                 preflight_model=args.preflight,
                 preflight_reasoning_effort=args.preflight_effort,
             )
@@ -143,6 +147,7 @@ def main() -> int:
                 "Models: "
                 f"routine={config.routine_model}, primary={config.primary_model}, "
                 f"rework={config.rework_model}, validator={config.validator_model}, "
+                f"feedback={config.feedback_model}, "
                 f"preflight={config.preflight_model}"
             )
             return 0

@@ -22,6 +22,76 @@ class RunResult:
     stderr: str
     cancelled: bool = False
     timed_out: bool = False
+    token_usage: "TokenUsage | None" = None
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    """Exact token totals emitted by Codex for one completed turn."""
+
+    input_tokens: int
+    cached_input_tokens: int
+    cache_write_input_tokens: int
+    output_tokens: int
+    reasoning_output_tokens: int
+    total_tokens: int
+
+
+@dataclass(frozen=True)
+class RateLimitWindow:
+    used_percent: int
+    resets_at: int | None
+    window_duration_mins: int | None
+
+
+@dataclass(frozen=True)
+class AccountUsageBucket:
+    limit_id: str
+    limit_name: str | None
+    primary: RateLimitWindow | None
+    secondary: RateLimitWindow | None
+
+
+@dataclass(frozen=True)
+class AccountUsageSnapshot:
+    observed_at: float
+    buckets: tuple[AccountUsageBucket, ...]
+
+
+def parse_token_usage(value: object) -> TokenUsage | None:
+    """Parse Codex's documented token-usage breakdown without guessing fields."""
+    if not isinstance(value, dict):
+        return None
+    required = (
+        "inputTokens",
+        "cachedInputTokens",
+        "cacheWriteInputTokens",
+        "outputTokens",
+        "reasoningOutputTokens",
+        "totalTokens",
+    )
+    if not all(isinstance(value.get(field), int) for field in required):
+        return None
+    return TokenUsage(
+        input_tokens=value["inputTokens"],
+        cached_input_tokens=value["cachedInputTokens"],
+        cache_write_input_tokens=value["cacheWriteInputTokens"],
+        output_tokens=value["outputTokens"],
+        reasoning_output_tokens=value["reasoningOutputTokens"],
+        total_tokens=value["totalTokens"],
+    )
+
+
+def _parse_rate_limit_window(value: object) -> RateLimitWindow | None:
+    if not isinstance(value, dict) or not isinstance(value.get("usedPercent"), int):
+        return None
+    resets_at = value.get("resetsAt")
+    duration = value.get("windowDurationMins")
+    return RateLimitWindow(
+        used_percent=value["usedPercent"],
+        resets_at=resets_at if isinstance(resets_at, int) else None,
+        window_duration_mins=duration if isinstance(duration, int) else None,
+    )
 
 
 def parse_codex_events(output: str) -> tuple[str, str | None]:
@@ -343,6 +413,109 @@ class CodexRunner:
             details = result.stderr.strip()[-500:] or "unknown Codex delete error"
             raise RuntimeError(details)
 
+    def read_account_usage(self, *, timeout_seconds: int = 20) -> AccountUsageSnapshot:
+        """Read Codex's live, account-level rate-limit state without starting a turn."""
+        process = subprocess.Popen(
+            self.build_app_server_command(approved=False, full_access=False),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=self.workdir,
+            env=self._child_env(),
+            start_new_session=True,
+        )
+        deadline = time.monotonic() + timeout_seconds
+        read_buffer = b""
+        request_id = 0
+
+        def request(method: str, params: object) -> dict[str, object]:
+            nonlocal read_buffer, request_id
+            request_id += 1
+            self._write_server_message(
+                process, {"method": method, "id": request_id, "params": params}
+            )
+            while True:
+                message = self._read_server_message_with_buffer(process, deadline, read_buffer)
+                if message is None:
+                    raise RuntimeError(f"Codex usage read timed out during {method}")
+                read_buffer = message[1]
+                payload = message[0]
+                if payload.get("id") == request_id:
+                    return payload
+
+        try:
+            initialized = request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "codeshark",
+                        "title": "Codeshark usage monitor",
+                        "version": "0.1.0",
+                    }
+                },
+            )
+            if "error" in initialized:
+                raise RuntimeError(self._server_error(initialized))
+            self._write_server_message(process, {"method": "initialized", "params": {}})
+            response = request("account/rateLimits/read", None)
+            if "error" in response:
+                raise RuntimeError(self._server_error(response))
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise RuntimeError("Codex usage read returned no rate-limit snapshot")
+            raw_buckets = result.get("rateLimitsByLimitId")
+            if not isinstance(raw_buckets, dict):
+                raw_buckets = {"codex": result.get("rateLimits")}
+            buckets: list[AccountUsageBucket] = []
+            for limit_id, value in raw_buckets.items():
+                if not isinstance(limit_id, str) or not isinstance(value, dict):
+                    continue
+                limit_name = value.get("limitName")
+                buckets.append(
+                    AccountUsageBucket(
+                        limit_id=limit_id,
+                        limit_name=limit_name if isinstance(limit_name, str) else None,
+                        primary=_parse_rate_limit_window(value.get("primary")),
+                        secondary=_parse_rate_limit_window(value.get("secondary")),
+                    )
+                )
+            if not buckets:
+                raise RuntimeError("Codex usage read returned no rate-limit buckets")
+            return AccountUsageSnapshot(observed_at=time.time(), buckets=tuple(buckets))
+        finally:
+            self._terminate(process)
+
+    @staticmethod
+    def _read_server_message_with_buffer(
+        process: subprocess.Popen[str],
+        deadline: float,
+        read_buffer: bytes,
+    ) -> tuple[dict[str, object], bytes] | None:
+        if process.stdout is None:
+            raise RuntimeError("Codex app-server stdout is unavailable")
+        while b"\n" not in read_buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            ready, _, _ = select.select([process.stdout.fileno()], [], [], remaining)
+            if not ready:
+                return None
+            chunk = os.read(process.stdout.fileno(), 64 * 1024)
+            if not chunk:
+                raise RuntimeError("Codex app-server closed its protocol stream")
+            read_buffer += chunk
+            if len(read_buffer) > 2_000_000:
+                raise RuntimeError("Codex app-server returned an oversized protocol message")
+        raw_line, _, read_buffer = read_buffer.partition(b"\n")
+        try:
+            message = json.loads(raw_line.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("Codex app-server returned invalid JSON") from exc
+        if not isinstance(message, dict):
+            raise RuntimeError("Codex app-server returned an invalid protocol message")
+        return message, read_buffer
+
     def run(
         self,
         prompt: str,
@@ -490,6 +663,7 @@ class CodexRunner:
         active_thread_id = thread_id
         messages: list[str] = []
         streamed_message = ""
+        token_usage: TokenUsage | None = None
         timed_out = False
         exit_code = 1
         error_message = ""
@@ -596,6 +770,10 @@ class CodexRunner:
                     delta = params.get("delta")
                     if isinstance(delta, str):
                         streamed_message += delta
+                elif method == "thread/tokenUsage/updated" and isinstance(params, dict):
+                    usage = params.get("tokenUsage")
+                    if isinstance(usage, dict):
+                        token_usage = parse_token_usage(usage.get("last"))
                 elif method == "turn/completed" and isinstance(params, dict):
                     turn = params.get("turn")
                     status = turn.get("status") if isinstance(turn, dict) else "failed"
@@ -632,6 +810,7 @@ class CodexRunner:
             stderr="\n".join(part for part in (error_message, stderr) if part),
             cancelled=cancelled,
             timed_out=timed_out,
+            token_usage=token_usage,
         )
 
     def steer(self, prompt: str) -> bool:

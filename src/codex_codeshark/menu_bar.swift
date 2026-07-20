@@ -63,6 +63,8 @@ struct DashboardModelUsage: Decodable, Identifiable {
     let runs: Int
     let completed: Int
     let elapsedSeconds: Double
+    let measuredRuns: Int?
+    let totalTokens: Int?
 
     var id: String { "\(model)-\(reasoningEffort)-\(phase)" }
 
@@ -70,6 +72,45 @@ struct DashboardModelUsage: Decodable, Identifiable {
         case model, phase, runs, completed
         case reasoningEffort = "reasoning_effort"
         case elapsedSeconds = "elapsed_seconds"
+        case measuredRuns = "measured_runs"
+        case totalTokens = "total_tokens"
+    }
+}
+
+struct DashboardQuotaWindow: Decodable {
+    let usedPercent: Int
+    let resetsAt: Int?
+    let windowDurationMins: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case usedPercent = "used_percent"
+        case resetsAt = "resets_at"
+        case windowDurationMins = "window_duration_mins"
+    }
+}
+
+struct DashboardUsageBucket: Decodable, Identifiable {
+    let limitID: String
+    let limitName: String?
+    let primary: DashboardQuotaWindow?
+    let secondary: DashboardQuotaWindow?
+
+    var id: String { limitID }
+
+    enum CodingKeys: String, CodingKey {
+        case limitID = "limit_id"
+        case limitName = "limit_name"
+        case primary, secondary
+    }
+}
+
+struct DashboardAccountUsage: Decodable {
+    let observedAt: Int
+    let buckets: [DashboardUsageBucket]
+
+    enum CodingKeys: String, CodingKey {
+        case observedAt = "observed_at"
+        case buckets
     }
 }
 
@@ -145,6 +186,7 @@ struct DashboardSnapshot: Decodable {
     let activityLog: [DashboardActivityLog]
     let modelUsage5h: [DashboardModelUsage]
     let modelUsage7d: [DashboardModelUsage]
+    let accountUsage: DashboardAccountUsage?
 
     static let empty = DashboardSnapshot(
         state: "starting",
@@ -157,7 +199,8 @@ struct DashboardSnapshot: Decodable {
         lastFailure: nil,
         activityLog: [],
         modelUsage5h: [],
-        modelUsage7d: []
+        modelUsage7d: [],
+        accountUsage: nil
     )
 
     enum CodingKeys: String, CodingKey {
@@ -172,6 +215,7 @@ struct DashboardSnapshot: Decodable {
         case activityLog = "activity_log"
         case modelUsage5h = "model_usage_5h"
         case modelUsage7d = "model_usage_7d"
+        case accountUsage = "account_usage"
     }
 
     init(
@@ -185,7 +229,8 @@ struct DashboardSnapshot: Decodable {
         lastFailure: DashboardFailure?,
         activityLog: [DashboardActivityLog],
         modelUsage5h: [DashboardModelUsage],
-        modelUsage7d: [DashboardModelUsage]
+        modelUsage7d: [DashboardModelUsage],
+        accountUsage: DashboardAccountUsage?
     ) {
         self.state = state
         self.activeTaskCount = activeTaskCount
@@ -198,6 +243,7 @@ struct DashboardSnapshot: Decodable {
         self.activityLog = activityLog
         self.modelUsage5h = modelUsage5h
         self.modelUsage7d = modelUsage7d
+        self.accountUsage = accountUsage
     }
 
     init(from decoder: Decoder) throws {
@@ -213,6 +259,7 @@ struct DashboardSnapshot: Decodable {
         activityLog = try container.decodeIfPresent([DashboardActivityLog].self, forKey: .activityLog) ?? []
         modelUsage5h = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage5h) ?? []
         modelUsage7d = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage7d) ?? []
+        accountUsage = try container.decodeIfPresent(DashboardAccountUsage.self, forKey: .accountUsage)
     }
 }
 
@@ -256,6 +303,29 @@ private func elapsedText(_ seconds: Int) -> String {
         return "\(minutes)m"
     }
     return "just now"
+}
+
+private func tokenText(_ tokens: Int) -> String {
+    if tokens >= 1_000_000 {
+        return String(format: "%.1fM tokens", Double(tokens) / 1_000_000)
+    }
+    if tokens >= 1_000 {
+        return String(format: "%.1fK tokens", Double(tokens) / 1_000)
+    }
+    return "\(tokens) tokens"
+}
+
+private func quotaWindowText(_ window: DashboardQuotaWindow) -> String {
+    let duration: String
+    if let minutes = window.windowDurationMins {
+        duration = minutes < 24 * 60 ? "\(minutes / 60)h window" : "\(minutes / (24 * 60))d window"
+    } else {
+        duration = "rolling window"
+    }
+    guard let reset = window.resetsAt else { return duration }
+    let formatter = DateFormatter()
+    formatter.dateFormat = "MMM d, HH:mm"
+    return "\(duration) · resets \(formatter.string(from: Date(timeIntervalSince1970: TimeInterval(reset))))"
 }
 
 private func compactModelName(_ model: String) -> String {
@@ -374,7 +444,8 @@ private struct ModelUsageGroup: Identifiable {
     let reasoningEffort: String
     let runs: Int
     let completed: Int
-    let elapsedSeconds: Double
+    let measuredRuns: Int
+    let totalTokens: Int
 
     var id: String { "\(model)-\(reasoningEffort)" }
 }
@@ -398,14 +469,15 @@ struct ModelUsageView: View {
                 reasoningEffort: entries[0].reasoningEffort,
                 runs: entries.reduce(0) { $0 + $1.runs },
                 completed: entries.reduce(0) { $0 + $1.completed },
-                elapsedSeconds: entries.reduce(0) { $0 + $1.elapsedSeconds }
+                measuredRuns: entries.reduce(0) { $0 + ($1.measuredRuns ?? 0) },
+                totalTokens: entries.reduce(0) { $0 + ($1.totalTokens ?? 0) }
             )
         }
-        .sorted { $0.elapsedSeconds > $1.elapsedSeconds }
+        .sorted { $0.totalTokens > $1.totalTokens }
     }
 
-    private var totalElapsedSeconds: Double {
-        groups.reduce(0) { $0 + $1.elapsedSeconds }
+    private var totalTokens: Int {
+        groups.reduce(0) { $0 + $1.totalTokens }
     }
 
     var body: some View {
@@ -413,8 +485,39 @@ struct ModelUsageView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Model Usage")
                     .font(.headline)
-                Text("Recorded execution contribution, not account quota.")
+                Text("Live account quota + exact tokens reported per Codex turn.")
                     .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let accountUsage = model.snapshot.accountUsage {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Codex account quota")
+                        .font(.subheadline.weight(.semibold))
+                    ForEach(accountUsage.buckets) { bucket in
+                        if let window = bucket.primary {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(bucket.limitName ?? (bucket.limitID == "codex" ? "Codex" : bucket.limitID))
+                                        .font(.caption.weight(.medium))
+                                    Spacer()
+                                    Text("\(window.usedPercent)% used")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                ProgressView(value: Double(window.usedPercent), total: 100)
+                                Text(quotaWindowText(window))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+            } else {
+                Text("Live account quota will appear after the first completed Codex turn.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -432,8 +535,8 @@ struct ModelUsageView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(groups) { group in
-                            let share = totalElapsedSeconds > 0
-                                ? Int((group.elapsedSeconds / totalElapsedSeconds * 100).rounded())
+                            let share = totalTokens > 0
+                                ? Int((Double(group.totalTokens) / Double(totalTokens) * 100).rounded())
                                 : 0
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -447,10 +550,10 @@ struct ModelUsageView: View {
                                         .font(.caption.monospacedDigit())
                                         .foregroundStyle(.secondary)
                                 }
-                                Text("\(group.runs) phases · \(group.completed) completed · \(elapsedText(Int(group.elapsedSeconds)))")
+                                Text("\(tokenText(group.totalTokens)) · exact data \(group.measuredRuns)/\(group.runs) turns · \(group.completed) completed")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
-                                ProgressView(value: totalElapsedSeconds > 0 ? group.elapsedSeconds / totalElapsedSeconds : 0)
+                                ProgressView(value: totalTokens > 0 ? Double(group.totalTokens) / Double(totalTokens) : 0)
                             }
                             .padding(10)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
@@ -462,7 +565,7 @@ struct ModelUsageView: View {
             Divider()
 
             HStack {
-                Text("Quota attribution is not exposed by Codex.")
+                Text("Account quota is aggregate; Codex does not expose per-model quota debits.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()
@@ -471,7 +574,7 @@ struct ModelUsageView: View {
             }
         }
         .padding(16)
-        .frame(width: 430, height: 410)
+        .frame(width: 450, height: 500)
     }
 }
 
@@ -624,10 +727,16 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private func usageMenuItem(snapshot: DashboardSnapshot) -> NSMenuItem {
         let item = NSMenuItem(title: "Usage", action: nil, keyEquivalent: "")
         let usage = NSMenu(title: "Usage")
-        let recent = snapshot.modelUsage5h.reduce(0) { $0 + $1.runs }
-        let weekly = snapshot.modelUsage7d.reduce(0) { $0 + $1.runs }
-        addSecondary("Last 5 hours · \(recent) phases", to: usage)
-        addSecondary("Last 7 days · \(weekly) phases", to: usage)
+        if let bucket = snapshot.accountUsage?.buckets.first(where: { $0.limitID == "codex" }),
+           let window = bucket.primary {
+            addSecondary("Codex · \(window.usedPercent)% used · \(quotaWindowText(window))", to: usage)
+        } else {
+            addSecondary("Live Codex quota will appear after the next turn", to: usage)
+        }
+        let recentTokens = snapshot.modelUsage5h.reduce(0) { $0 + ($1.totalTokens ?? 0) }
+        let weeklyTokens = snapshot.modelUsage7d.reduce(0) { $0 + ($1.totalTokens ?? 0) }
+        addSecondary("Last 5 hours · \(tokenText(recentTokens))", to: usage)
+        addSecondary("Last 7 days · \(tokenText(weeklyTokens))", to: usage)
         usage.addItem(.separator())
         usage.addItem(actionItem("Open Usage", action: #selector(openUsage(_:))))
         item.submenu = usage
@@ -695,7 +804,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 440),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -708,24 +817,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Model Routing")
         title.font = .systemFont(ofSize: 17, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 347, width: 580, height: 24)
+        title.frame = NSRect(x: 20, y: 387, width: 580, height: 24)
         content.addSubview(title)
 
         let detail = NSTextField(wrappingLabelWithString: "Choose a model and a supported reasoning effort for each role. Applying restarts Codeshark.")
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 305, width: 580, height: 34)
+        detail.frame = NSRect(x: 20, y: 345, width: 580, height: 34)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 11, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 185, y: 278, width: 235, height: 16)
+        modelHeader.frame = NSRect(x: 185, y: 318, width: 235, height: 16)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 11, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 430, y: 278, width: 170, height: 16)
+        effortHeader.frame = NSRect(x: 430, y: 318, width: 170, height: 16)
         content.addSubview(effortHeader)
 
         let roles = [
@@ -733,13 +842,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             ("Preflight", "Preflight", "gpt-5.6-luna", "low"),
             ("Primary", "Primary", "gpt-5.6-sol", "high"),
             ("Rework", "Rework", "gpt-5.6-sol", "high"),
-            ("Validation / Feedback", "Validation · Feedback", "gpt-5.6-terra", "high"),
+            ("Validation", "Validation", "gpt-5.6-terra", "high"),
+            ("Feedback", "Feedback", "gpt-5.6-terra", "high"),
         ]
         modelOptions = availableModelOptions()
         modelPickers = [:]
         reasoningPickers = [:]
         for (index, role) in roles.enumerated() {
-            let y = 235 - (index * 38)
+            let y = 275 - (index * 38)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 13, weight: .medium)
             label.frame = NSRect(x: 20, y: y + 4, width: 155, height: 20)
@@ -856,9 +966,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let reworkPicker = modelPickers["Rework"],
               let rework = selectedModel(reworkPicker),
               let reworkEffort = reasoningPickers["Rework"]?.titleOfSelectedItem,
-              let validatorPicker = modelPickers["Validation · Feedback"],
+              let validatorPicker = modelPickers["Validation"],
               let validator = selectedModel(validatorPicker),
-              let validatorEffort = reasoningPickers["Validation · Feedback"]?.titleOfSelectedItem
+              let validatorEffort = reasoningPickers["Validation"]?.titleOfSelectedItem,
+              let feedbackPicker = modelPickers["Feedback"],
+              let feedback = selectedModel(feedbackPicker),
+              let feedbackEffort = reasoningPickers["Feedback"]?.titleOfSelectedItem
         else {
             showError("Could not read the selected model routing.")
             return
@@ -876,6 +989,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--rework-effort", reworkEffort,
             "--validator", validator,
             "--validator-effort", validatorEffort,
+            "--feedback", feedback,
+            "--feedback-effort", feedbackEffort,
         ])
     }
 

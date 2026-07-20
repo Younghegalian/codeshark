@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from codex_codeshark.codex_runner import CodexRunner, parse_codex_events
+from codex_codeshark.codex_runner import CodexRunner, parse_codex_events, parse_token_usage
 
 
 class CodexRunnerTests(unittest.TestCase):
@@ -379,6 +379,29 @@ class CodexRunnerTests(unittest.TestCase):
             ]
         )
         self.assertEqual(parse_codex_events(output), ("done", "abc"))
+
+    def test_parses_exact_token_usage_breakdown(self) -> None:
+        usage = parse_token_usage(
+            {
+                "inputTokens": 100,
+                "cachedInputTokens": 20,
+                "cacheWriteInputTokens": 5,
+                "outputTokens": 30,
+                "reasoningOutputTokens": 10,
+                "totalTokens": 130,
+            }
+        )
+
+        self.assertIsNotNone(usage)
+        self.assertEqual(usage.input_tokens, 100)
+        self.assertEqual(usage.cached_input_tokens, 20)
+        self.assertEqual(usage.cache_write_input_tokens, 5)
+        self.assertEqual(usage.output_tokens, 30)
+        self.assertEqual(usage.reasoning_output_tokens, 10)
+        self.assertEqual(usage.total_tokens, 130)
+
+    def test_rejects_incomplete_token_usage_breakdown(self) -> None:
+        self.assertIsNone(parse_token_usage({"inputTokens": 100}))
 
 
 if __name__ == "__main__":

@@ -57,6 +57,8 @@ class Config:
     rework_reasoning_effort: str = "high"
     validator_model: str = "gpt-5.6-terra"
     validator_reasoning_effort: str = "high"
+    feedback_model: str = "gpt-5.6-terra"
+    feedback_reasoning_effort: str = "high"
     preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
     poll_timeout_seconds: int = 30
@@ -146,6 +148,10 @@ def load_config(path: Path | None = None) -> Config:
         data,
         "validator_reasoning_effort",
         data.get("subagent_reasoning_effort", "high"),
+    )
+    feedback_model = _require_model_setting(data, "feedback_model", validator_model)
+    feedback_reasoning_effort = _require_reasoning_effort(
+        data, "feedback_reasoning_effort", validator_reasoning_effort
     )
     preflight_model = _require_model_setting(data, "preflight_model", "gpt-5.6-luna")
     preflight_reasoning_effort = _require_reasoning_effort(
@@ -274,6 +280,8 @@ def load_config(path: Path | None = None) -> Config:
         rework_reasoning_effort=rework_reasoning_effort,
         validator_model=validator_model,
         validator_reasoning_effort=validator_reasoning_effort,
+        feedback_model=feedback_model,
+        feedback_reasoning_effort=feedback_reasoning_effort,
         preflight_model=preflight_model,
         preflight_reasoning_effort=preflight_reasoning_effort,
         poll_timeout_seconds=poll_timeout,
@@ -332,6 +340,8 @@ def set_model_assignments(
     rework_model: str | None = None,
     rework_reasoning_effort: str | None = None,
     validator_reasoning_effort: str | None = None,
+    feedback_model: str | None = None,
+    feedback_reasoning_effort: str | None = None,
     preflight_reasoning_effort: str | None = None,
 ) -> Config:
     """Persist the role-specific model routing without rewriting unrelated settings."""
@@ -346,6 +356,8 @@ def set_model_assignments(
         "rework_reasoning_effort": rework_reasoning_effort or current.rework_reasoning_effort,
         "validator_model": validator_model,
         "validator_reasoning_effort": validator_reasoning_effort or current.validator_reasoning_effort,
+        "feedback_model": feedback_model or current.feedback_model,
+        "feedback_reasoning_effort": feedback_reasoning_effort or current.feedback_reasoning_effort,
         "preflight_model": preflight_model,
         "preflight_reasoning_effort": preflight_reasoning_effort or current.preflight_reasoning_effort,
     }
@@ -693,6 +705,8 @@ def write_local_config(
             'rework_reasoning_effort = "high"',
             'validator_model = "gpt-5.6-terra"',
             'validator_reasoning_effort = "high"',
+            'feedback_model = "gpt-5.6-terra"',
+            'feedback_reasoning_effort = "high"',
             'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
             "poll_timeout_seconds = 30",

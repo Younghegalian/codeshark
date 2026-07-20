@@ -204,6 +204,8 @@ rework_model = "gpt-5.6-sol"
 rework_reasoning_effort = "high"
 validator_model = "gpt-5.6-terra"
 validator_reasoning_effort = "high"
+feedback_model = "gpt-5.6-terra"
+feedback_reasoning_effort = "high"
 preflight_model = "gpt-5.6-luna"
 preflight_reasoning_effort = "low"
 ```

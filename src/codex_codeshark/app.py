@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .automation import AgentStore, RiskPolicy, TaskRecord, next_cron_time
-from .codex_runner import CodexRunner, RunResult
+from .codex_runner import AccountUsageSnapshot, CodexRunner, RunResult
 from .config import (
     Config,
     group_worker_runtime,
@@ -375,6 +375,14 @@ class AgentApp:
             )
             for worker_index in range(config.worker_count)
         )
+        self._feedback_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.feedback_model,
+                reasoning_effort=self.config.feedback_reasoning_effort,
+            )
+            for worker_index in range(config.worker_count)
+        )
         self._preflight_runners = tuple(
             self._build_runner(
                 worker_index,
@@ -385,6 +393,9 @@ class AgentApp:
         )
         self.runner = self._worker_runners[0]
         self._status_lock = threading.Lock()
+        self._account_usage_lock = threading.Lock()
+        self._account_usage: AccountUsageSnapshot | None = None
+        self._account_usage_error_at = 0.0
         self._active_tasks: dict[str, ActiveTask] = {}
         self._artifact_revision_task_ids: set[str] = set()
         self._last_completed_task: CompletedTask | None = None
@@ -401,6 +412,57 @@ class AgentApp:
 
     def _deliverables_dir(self) -> Path:
         return self._workspace_system_dir() / "deliverables"
+
+    def _refresh_account_usage(self, *, force: bool = False) -> AccountUsageSnapshot | None:
+        """Cache the live account quota separately from per-turn model token totals."""
+        if not isinstance(self.runner, CodexRunner):
+            with self._account_usage_lock:
+                return self._account_usage
+        now = time.time()
+        with self._account_usage_lock:
+            cached = self._account_usage
+            if not force and cached is not None and now - cached.observed_at < 60:
+                return cached
+            if not force and now - self._account_usage_error_at < 60:
+                return cached
+        try:
+            snapshot = self.runner.read_account_usage()
+        except (OSError, RuntimeError, ValueError):
+            with self._account_usage_lock:
+                self._account_usage_error_at = now
+                return self._account_usage
+        with self._account_usage_lock:
+            self._account_usage = snapshot
+            self._account_usage_error_at = 0.0
+            return snapshot
+
+    def _account_usage_payload(self) -> dict[str, object] | None:
+        with self._account_usage_lock:
+            snapshot = self._account_usage
+        if snapshot is None:
+            return None
+
+        def window_payload(window: object) -> dict[str, int | None] | None:
+            if window is None:
+                return None
+            return {
+                "used_percent": window.used_percent,
+                "resets_at": window.resets_at,
+                "window_duration_mins": window.window_duration_mins,
+            }
+
+        return {
+            "observed_at": int(snapshot.observed_at),
+            "buckets": [
+                {
+                    "limit_id": bucket.limit_id,
+                    "limit_name": bucket.limit_name,
+                    "primary": window_payload(bucket.primary),
+                    "secondary": window_payload(bucket.secondary),
+                }
+                for bucket in snapshot.buckets
+            ],
+        }
 
     def _write_menu_status(self, active_task_count: int) -> None:
         """Publish only non-sensitive activity for the local menu bar companion."""
@@ -463,8 +525,13 @@ class AgentApp:
                             },
                             {
                                 "model": self.config.validator_model,
-                                "role": "Validation · Feedback",
+                                "role": "Validation",
                                 "reasoning_effort": self.config.validator_reasoning_effort,
+                            },
+                            {
+                                "model": self.config.feedback_model,
+                                "role": "Feedback",
+                                "reasoning_effort": self.config.feedback_reasoning_effort,
                             },
                         ],
                         "active_tasks": active_summary,
@@ -486,6 +553,13 @@ class AgentApp:
                                 "runs": summary.runs,
                                 "completed": summary.completed,
                                 "elapsed_seconds": round(summary.elapsed_seconds, 1),
+                                "measured_runs": summary.measured_runs,
+                                "input_tokens": summary.input_tokens,
+                                "cached_input_tokens": summary.cached_input_tokens,
+                                "cache_write_input_tokens": summary.cache_write_input_tokens,
+                                "output_tokens": summary.output_tokens,
+                                "reasoning_output_tokens": summary.reasoning_output_tokens,
+                                "total_tokens": summary.total_tokens,
                             }
                             for summary in model_usage
                         ],
@@ -497,9 +571,17 @@ class AgentApp:
                                 "runs": summary.runs,
                                 "completed": summary.completed,
                                 "elapsed_seconds": round(summary.elapsed_seconds, 1),
+                                "measured_runs": summary.measured_runs,
+                                "input_tokens": summary.input_tokens,
+                                "cached_input_tokens": summary.cached_input_tokens,
+                                "cache_write_input_tokens": summary.cache_write_input_tokens,
+                                "output_tokens": summary.output_tokens,
+                                "reasoning_output_tokens": summary.reasoning_output_tokens,
+                                "total_tokens": summary.total_tokens,
                             }
                             for summary in weekly_model_usage
                         ],
+                        "account_usage": self._account_usage_payload(),
                         "activity_log": [
                             {
                                 "id": str(run.id),
@@ -646,12 +728,13 @@ class AgentApp:
         self.api.set_commands()
         self.store.recover_interrupted_tasks()
         LOGGER.info("starting @%s", identity.get("username", "unknown"))
-        for worker_index, (runner, primary_runner, rework_runner, subagent_runner, preflight_runner) in enumerate(
+        for worker_index, (runner, primary_runner, rework_runner, subagent_runner, feedback_runner, preflight_runner) in enumerate(
             zip(
                 self._worker_runners,
                 self._primary_runners,
                 self._rework_runners,
                 self._subagent_runners,
+                self._feedback_runners,
                 self._preflight_runners,
                 strict=True,
             ),
@@ -659,7 +742,7 @@ class AgentApp:
         ):
             threading.Thread(
                 target=self._worker,
-                args=(runner, primary_runner, rework_runner, subagent_runner, preflight_runner),
+                args=(runner, primary_runner, rework_runner, subagent_runner, feedback_runner, preflight_runner),
                 name=f"codex-worker-{worker_index}",
                 daemon=True,
             ).start()
@@ -1095,6 +1178,7 @@ class AgentApp:
         primary_runner: CodexRunner,
         rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
+        feedback_runner: CodexRunner,
         preflight_runner: CodexRunner,
     ) -> None:
         while True:
@@ -1122,6 +1206,7 @@ class AgentApp:
                     preflight_runner,
                     primary_runner=primary_runner,
                     rework_runner=rework_runner,
+                    feedback_runner=feedback_runner,
                 )
                 if result.cancelled:
                     status = "cancelled"
@@ -1166,12 +1251,14 @@ class AgentApp:
         *,
         primary_runner: CodexRunner | None = None,
         rework_runner: CodexRunner | None = None,
+        feedback_runner: CodexRunner | None = None,
     ) -> RunResult:
         runner = runner or self.runner
         subagent_runner = subagent_runner or runner
         preflight_runner = preflight_runner or subagent_runner
         primary_runner = primary_runner or runner
         rework_runner = rework_runner or primary_runner
+        feedback_runner = feedback_runner or subagent_runner
         project, request = unpack_project_task(task.prompt) if not task.restricted else (
             DEFAULT_PROJECT,
             task.prompt,
@@ -1286,6 +1373,7 @@ class AgentApp:
                 primary_runner,
                 rework_runner,
                 subagent_runner,
+                feedback_runner,
                 preflight_runner,
                 prompt,
                 thread_id,
@@ -2015,7 +2103,8 @@ class AgentApp:
         self,
         runner: CodexRunner,
         rework_runner: CodexRunner,
-        subagent_runner: CodexRunner,
+        validator_runner: CodexRunner,
+        feedback_runner: CodexRunner,
         preflight_runner: CodexRunner,
         prompt: str,
         thread_id: str | None,
@@ -2088,7 +2177,7 @@ class AgentApp:
 
         validator_prompt = self._cross_validator_prompt(request, primary_result.message)
         validator_result, failed_validator_sessions, cancelled = self._run_fresh_validator(
-            subagent_runner,
+            validator_runner,
             validator_prompt,
             task_id=task_id,
             phase="validator",
@@ -2113,7 +2202,7 @@ class AgentApp:
             return self._run_feedback_loop(
                 runner,
                 rework_runner,
-                subagent_runner,
+                feedback_runner,
                 request=request,
                 primary_thread_id=primary_result.thread_id,
                 initial_findings=validator_result.message,
@@ -2200,7 +2289,7 @@ class AgentApp:
         self,
         primary_runner: CodexRunner,
         rework_runner: CodexRunner,
-        subagent_runner: CodexRunner,
+        feedback_runner: CodexRunner,
         *,
         request: str,
         primary_thread_id: str,
@@ -2234,7 +2323,7 @@ class AgentApp:
                 iterations,
             )
             verification, failed_sessions, cancelled = self._run_fresh_validator(
-                subagent_runner,
+                feedback_runner,
                 verification_prompt,
                 task_id=task_id,
                 phase="feedback-verifier",
@@ -2329,7 +2418,20 @@ class AgentApp:
             exit_code=result.exit_code,
             cancelled=result.cancelled,
             timed_out=result.timed_out,
+            input_tokens=result.token_usage.input_tokens if result.token_usage else 0,
+            cached_input_tokens=result.token_usage.cached_input_tokens if result.token_usage else 0,
+            cache_write_input_tokens=(
+                result.token_usage.cache_write_input_tokens if result.token_usage else 0
+            ),
+            output_tokens=result.token_usage.output_tokens if result.token_usage else 0,
+            reasoning_output_tokens=(
+                result.token_usage.reasoning_output_tokens if result.token_usage else 0
+            ),
+            total_tokens=result.token_usage.total_tokens if result.token_usage else 0,
+            token_usage_recorded=result.token_usage is not None,
         )
+        if result.token_usage is not None:
+            self._refresh_account_usage()
         return result
 
     def _cross_validator_prompt(self, request: str, primary_handoff: str) -> str:
@@ -3023,10 +3125,43 @@ class AgentApp:
             ("Last 7 days", now - 7 * 24 * 60 * 60),
         )
         lines = [
-            "Model activity telemetry (execution proxy)",
-            "This records run count, outcomes, and wall time—not exact ChatGPT quota consumption.",
-            "For the account's remaining quota/reset time, use Codex /usage and compare snapshots.",
+            "Codex usage telemetry",
+            "Per-model totals are the exact tokens Codex reported for each tracked turn.",
         ]
+        snapshot = self._refresh_account_usage(force=True)
+        if snapshot is None:
+            lines.append("Live account quota is temporarily unavailable; tracked token totals remain available.")
+        else:
+            lines.append("Live Codex account quota:")
+            for bucket in snapshot.buckets:
+                label = bucket.limit_name or (
+                    "Codex" if bucket.limit_id == "codex" else bucket.limit_id
+                )
+                quota_windows = []
+                for window in (bucket.primary, bucket.secondary):
+                    if window is None:
+                        continue
+                    duration = (
+                        f"{window.window_duration_mins // 60}h"
+                        if window.window_duration_mins and window.window_duration_mins < 24 * 60
+                        else f"{window.window_duration_mins // (24 * 60)}d"
+                        if window.window_duration_mins
+                        else "rolling"
+                    )
+                    reset = (
+                        datetime.fromtimestamp(window.resets_at).strftime("%Y-%m-%d %H:%M")
+                        if window.resets_at
+                        else "unknown"
+                    )
+                    quota_windows.append(
+                        f"{window.used_percent}% used ({duration}, resets {reset})"
+                    )
+                lines.append(
+                    f"- {label}: {'; '.join(quota_windows) if quota_windows else 'not metered'}"
+                )
+            lines.append(
+                "Codex exposes this plan quota in aggregate; it does not expose a model-by-model quota debit."
+            )
         for title, since in windows:
             summaries = self.store.model_run_summaries(since=since)
             lines.append("")
@@ -3038,6 +3173,7 @@ class AgentApp:
                 elapsed_minutes = summary.elapsed_seconds / 60
                 lines.append(
                     f"- {summary.model} ({summary.reasoning_effort}), {summary.phase}: "
+                    f"{summary.total_tokens:,} tokens from {summary.measured_runs}/{summary.runs} turns; "
                     f"{summary.completed}/{summary.runs} completed, {elapsed_minutes:.1f} min"
                 )
         return "\n".join(lines)

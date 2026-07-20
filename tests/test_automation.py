@@ -60,6 +60,13 @@ class AgentStoreTests(unittest.TestCase):
                 exit_code=0,
                 cancelled=False,
                 timed_out=False,
+                input_tokens=120,
+                cached_input_tokens=30,
+                cache_write_input_tokens=10,
+                output_tokens=40,
+                reasoning_output_tokens=15,
+                total_tokens=160,
+                token_usage_recorded=True,
             )
             store.record_model_run(
                 task_id="task-2",
@@ -80,8 +87,11 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(summaries[0].runs, 1)
             self.assertEqual(summaries[0].completed, 1)
             self.assertEqual(summaries[0].elapsed_seconds, 60.0)
+            self.assertEqual(summaries[0].measured_runs, 1)
+            self.assertEqual(summaries[0].total_tokens, 160)
             self.assertEqual(summaries[1].model, "gpt-5.6-terra")
             self.assertEqual(summaries[1].completed, 0)
+            self.assertEqual(summaries[1].measured_runs, 0)
 
     def test_persists_and_recovers_running_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
