@@ -72,6 +72,12 @@ class ConfigTests(unittest.TestCase):
                         'validator_model = "gpt-5.6-terra"',
                         'preflight_model = "gpt-5.6-luna"',
                         "worker_count = 8",
+                        "",
+                        "[mcp_policy]",
+                        'known_servers = ["docs"]',
+                        "",
+                        "[mcp_policy.allowed_tools]",
+                        'docs = ["search"]',
                     ]
                 )
                 + "\n",
@@ -93,6 +99,7 @@ class ConfigTests(unittest.TestCase):
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("worker_count = 8", text)
             self.assertIn('rework_model = "gpt-5.6-sol"', text)
+            self.assertLess(text.index('rework_model = "gpt-5.6-sol"'), text.index("[mcp_policy]"))
 
     def test_sets_rework_and_model_specific_reasoning_assignments(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

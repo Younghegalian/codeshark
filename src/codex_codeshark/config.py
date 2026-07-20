@@ -366,6 +366,7 @@ def set_model_assignments(
     except OSError as exc:
         raise ConfigError(f"cannot read config: {exc}") from exc
     updated = original
+    missing_settings: list[str] = []
     for setting, value in assignments.items():
         updated, replacements = re.subn(
             rf'(?m)^{setting}\s*=\s*"(?:[^"\\\\]|\\\\.)*"\s*$',
@@ -375,7 +376,19 @@ def set_model_assignments(
         if replacements > 1:
             raise ConfigError(f"config must contain exactly one quoted {setting} setting")
         if replacements == 0:
-            updated = updated.rstrip() + f"\n{setting} = {json.dumps(value)}\n"
+            missing_settings.append(f"{setting} = {json.dumps(value)}")
+    if missing_settings:
+        first_table = re.search(r"(?m)^\[", updated)
+        if first_table is None:
+            updated = updated.rstrip() + "\n" + "\n".join(missing_settings) + "\n"
+        else:
+            updated = (
+                updated[: first_table.start()].rstrip()
+                + "\n"
+                + "\n".join(missing_settings)
+                + "\n\n"
+                + updated[first_table.start() :]
+            )
     if updated == original:
         return load_config(path)
     atomic_write_text(path, updated)
