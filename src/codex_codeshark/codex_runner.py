@@ -303,7 +303,8 @@ class CodexRunner:
         approved: bool,
         full_access: bool,
     ) -> list[str]:
-        command = [str(self.binary), "--profile", self.profile, "-C", str(self.workdir)]
+        command = [str(self.binary), "-C", str(self.workdir)]
+        command.extend(["-c", 'service_tier="standard"'])
         if self.model:
             command.extend(["-c", f"model={json.dumps(self.model)}"])
         if self.model_reasoning_effort:
