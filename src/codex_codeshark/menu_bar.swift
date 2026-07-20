@@ -434,24 +434,27 @@ private func tokenText(_ tokens: Int) -> String {
 }
 
 private final class StatusMenuRow: NSView {
-    init(title: String, color: NSColor) {
-        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
+    private let dotColor: NSColor
 
-        let dot = NSTextField(labelWithString: "●")
-        dot.font = .systemFont(ofSize: 14)
-        dot.textColor = color
-        dot.frame = NSRect(x: 14, y: 5, width: 12, height: 18)
-        addSubview(dot)
+    init(title: String, color: NSColor) {
+        dotColor = color
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 28))
 
         let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 14)
         label.textColor = .secondaryLabelColor
-        label.frame = NSRect(x: 32, y: 5, width: 274, height: 18)
+        label.frame = NSRect(x: 34, y: 5, width: 272, height: 18)
         addSubview(label)
     }
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        dotColor.setFill()
+        NSBezierPath(ovalIn: NSRect(x: 16, y: 8, width: 12, height: 12)).fill()
     }
 
     override func mouseDown(with event: NSEvent) {}
