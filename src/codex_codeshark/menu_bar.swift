@@ -792,19 +792,6 @@ struct ModelUsageView: View {
         }
     }
 
-    private var pricedGroupCount: Int {
-        groups.filter {
-            apiEquivalentCost(
-                model: $0.model,
-                inputTokens: $0.inputTokens,
-                cachedInputTokens: $0.cachedInputTokens,
-                cacheWriteInputTokens: $0.cacheWriteInputTokens,
-                outputTokens: $0.outputTokens,
-                reasoningOutputTokens: $0.reasoningOutputTokens
-            ) != nil
-        }.count
-    }
-
     private var projectGroups: [ProjectUsageGroup] {
         Dictionary(grouping: projectEntries, by: \.project)
             .map { ProjectUsageGroup(project: $0.key, entries: $0.value) }
@@ -878,7 +865,7 @@ struct ModelUsageView: View {
                     Text("TOTAL TOKENS")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
-                    Text("\(tokenText(totalTokens)) tokens")
+                    Text(tokenText(totalTokens))
                         .font(.subheadline.weight(.semibold))
                 }
                 Spacer()
@@ -894,7 +881,7 @@ struct ModelUsageView: View {
             .padding(.vertical, 8)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
 
-            Text("Official API rates · \(pricedGroupCount)/\(groups.count) model groups priced · includes cache reads, writes, and reasoning output.")
+            Text("Recorded cache and reasoning output are included in the API-equivalent estimate.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
