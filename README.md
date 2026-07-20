@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="assets/codeshark-mascot.png" alt="Codex-codeshark mascot" width="300">
-  <h1>Codex-codeshark</h1>
-  <p><strong>Your Codex agent, on call from anywhere.</strong></p>
+  <img src="assets/codeshark-mascot.png" alt="Codeshark mascot" width="300">
+  <h1>Codeshark</h1>
+  <p><strong>Your macOS-resident remote orchestration companion for Codex.</strong></p>
   <p>
-    Hand off repo work, investigations, and recurring checks.<br>
-    Codeshark runs on your Mac, learns how you work, and returns the finished result.
+    Codeshark gives Codex durable project context, task orchestration, and delivery.<br>
+    Control it remotely through Telegram or locally from your Mac menu bar.
   </p>
   <p>
     <a href="https://github.com/codeshark94/codeshark/actions/workflows/tests.yml"><img src="https://github.com/codeshark94/codeshark/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
@@ -22,7 +22,7 @@
   </p>
 </div>
 
-Codex-codeshark turns the OpenAI Codex CLI already installed on your Mac into a persistent local agent. Give it an outcome, not a sequence of button clicks: it can inspect and modify approved projects, run commands, work from attached files, keep context across tasks, and follow up later on a schedule. Telegram provides the current remote chat interface; reasoning, tools, project access, memory, and automation run in the local agent runtime.
+Codeshark is a macOS-resident remote orchestration companion for the OpenAI Codex CLI already installed on your Mac. It does not replace Codex: Codex is the reasoning and execution engine, while Codeshark supplies the persistent operating layer around it—project and session continuity, task routing, memory, delivery, and local status/control. Give it an outcome, not a sequence of button clicks: it can inspect and modify approved projects, run commands, work from attached files, keep context across tasks, and follow up later on a schedule. Telegram is the remote chat interface, while the menu-bar companion provides local visibility and control; reasoning, tools, project access, memory, and automation remain in the local agent runtime.
 
 > [!IMPORTANT]
 > Codex-codeshark is tuned for one administrator and one Mac, with local runtime state and server-controlled project access.
