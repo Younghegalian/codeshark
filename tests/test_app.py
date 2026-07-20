@@ -678,16 +678,18 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             payload["model_assignments"][2],
             {
                 "model": "gpt-5.6-sol",
-                "role": "Primary · Rework",
+                "role": "Primary",
                 "reasoning_effort": "high",
             },
         )
+        self.assertEqual(payload["model_assignments"][3]["role"], "Rework")
         self.assertEqual(payload["active_tasks"][0]["phase"], "Primary task")
         self.assertEqual(payload["active_tasks"][0]["project"], "Private Project")
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
         self.assertEqual(payload["last_failure"]["message"], "brief diagnostic")
-        self.assertEqual(payload["model_usage"][0]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_usage_5h"][0]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_usage_7d"][0]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["activity_log"][0]["phase"], "primary")
         self.assertEqual(payload["activity_log"][0]["outcome"], "completed")
         self.assertNotIn("secret request text", json.dumps(payload))
@@ -1147,6 +1149,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
     def test_creates_configured_isolated_group_worker_runners(self) -> None:
         self.assertEqual(len(self.app._worker_runners), self.config.worker_count)
         self.assertEqual(len(self.app._primary_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._rework_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         workdirs = {runner.restricted_workdir for runner in self.app._worker_runners}
@@ -1165,6 +1168,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.primary_model
                 and runner.model_reasoning_effort == self.config.primary_reasoning_effort
                 for runner in self.app._primary_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.rework_model
+                and runner.model_reasoning_effort == self.config.rework_reasoning_effort
+                for runner in self.app._rework_runners
             )
         )
         self.assertTrue(

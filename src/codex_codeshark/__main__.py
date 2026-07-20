@@ -45,9 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
     workspace.add_argument("directory", type=Path)
     models = commands.add_parser("set-models", help="set the role-specific Codeshark models")
     models.add_argument("--routine", required=True)
+    models.add_argument("--routine-effort", required=True)
     models.add_argument("--primary", required=True)
+    models.add_argument("--primary-effort", required=True)
+    models.add_argument("--rework", required=True)
+    models.add_argument("--rework-effort", required=True)
     models.add_argument("--validator", required=True)
+    models.add_argument("--validator-effort", required=True)
     models.add_argument("--preflight", required=True)
+    models.add_argument("--preflight-effort", required=True)
     logs = commands.add_parser("logs", help="show sanitized background service logs")
     logs.add_argument("--lines", type=int, default=100)
     for name, help_text in (
@@ -114,9 +120,15 @@ def main() -> int:
         if args.command == "set-models":
             config = set_model_assignments(
                 routine_model=args.routine,
+                routine_reasoning_effort=args.routine_effort,
                 primary_model=args.primary,
+                primary_reasoning_effort=args.primary_effort,
+                rework_model=args.rework,
+                rework_reasoning_effort=args.rework_effort,
                 validator_model=args.validator,
+                validator_reasoning_effort=args.validator_effort,
                 preflight_model=args.preflight,
+                preflight_reasoning_effort=args.preflight_effort,
             )
             status = restart_service()
             if not status.running:
@@ -124,7 +136,8 @@ def main() -> int:
             print(
                 "Models: "
                 f"routine={config.routine_model}, primary={config.primary_model}, "
-                f"validator={config.validator_model}, preflight={config.preflight_model}"
+                f"rework={config.rework_model}, validator={config.validator_model}, "
+                f"preflight={config.preflight_model}"
             )
             return 0
         if args.command == "export-data":

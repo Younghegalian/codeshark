@@ -92,6 +92,45 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.preflight_model, "gpt-5.6-terra")
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("worker_count = 8", text)
+            self.assertIn('rework_model = "gpt-5.6-sol"', text)
+
+    def test_sets_rework_and_model_specific_reasoning_assignments(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "codex"
+            binary.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            config_path = root / "config.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "allowed_user_ids = [123]",
+                        f'workdir = "{workspace}"',
+                        f'codex_binary = "{binary}"',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            updated = set_model_assignments(
+                routine_model="gpt-5.6-luna",
+                routine_reasoning_effort="max",
+                primary_model="gpt-5.6-sol",
+                primary_reasoning_effort="ultra",
+                rework_model="gpt-5.4-nano",
+                rework_reasoning_effort="xhigh",
+                validator_model="gpt-5.6-terra",
+                validator_reasoning_effort="max",
+                preflight_model="gpt-5.5",
+                preflight_reasoning_effort="medium",
+                config_path=config_path,
+            )
+
+            self.assertEqual(updated.primary_reasoning_effort, "ultra")
+            self.assertEqual(updated.rework_model, "gpt-5.4-nano")
+            self.assertEqual(updated.rework_reasoning_effort, "xhigh")
 
     def test_validates_bot_token_without_echoing_invalid_value(self) -> None:
         token = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_123456"
@@ -202,7 +241,7 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "worker_count"):
                 load_config(config)
 
-    def test_rejects_reasoning_effort_above_high(self) -> None:
+    def test_rejects_unknown_reasoning_effort(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / "codex"
@@ -216,7 +255,7 @@ class ConfigTests(unittest.TestCase):
                         "allowed_user_ids = [123]",
                         f'workdir = "{workspace}"',
                         f'codex_binary = "{binary}"',
-                        'primary_reasoning_effort = "xhigh"',
+                        'primary_reasoning_effort = "beyond"',
                     ]
                 ),
                 encoding="utf-8",

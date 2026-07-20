@@ -36,7 +36,7 @@ KEYCHAIN_SERVICE = "codex-codeshark.bot-token"
 _BOT_TOKEN_PATTERN = re.compile(r"[0-9]+:[A-Za-z0-9_-]+")
 _MIN_PERMISSION_PROFILE_VERSION = (0, 138, 0)
 _MODEL_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]{1,100}")
-_MAX_REASONING_EFFORTS = frozenset({"low", "medium", "high"})
+_REASONING_EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max", "ultra"})
 
 
 class ConfigError(RuntimeError):
@@ -53,6 +53,8 @@ class Config:
     routine_reasoning_effort: str = "medium"
     primary_model: str = "gpt-5.6-sol"
     primary_reasoning_effort: str = "high"
+    rework_model: str = "gpt-5.6-sol"
+    rework_reasoning_effort: str = "high"
     validator_model: str = "gpt-5.6-terra"
     validator_reasoning_effort: str = "high"
     preflight_model: str = "gpt-5.6-luna"
@@ -100,8 +102,8 @@ def _require_model_setting(data: dict[str, Any], key: str, default: str) -> str:
 
 def _require_reasoning_effort(data: dict[str, Any], key: str, default: str) -> str:
     value = data.get(key, default)
-    if value not in _MAX_REASONING_EFFORTS:
-        allowed = ", ".join(sorted(_MAX_REASONING_EFFORTS))
+    if value not in _REASONING_EFFORTS:
+        allowed = ", ".join(sorted(_REASONING_EFFORTS))
         raise ConfigError(f"{key} must be one of: {allowed}")
     return value
 
@@ -134,6 +136,10 @@ def load_config(path: Path | None = None) -> Config:
     primary_model = _require_model_setting(data, "primary_model", "gpt-5.6-sol")
     primary_reasoning_effort = _require_reasoning_effort(
         data, "primary_reasoning_effort", "high"
+    )
+    rework_model = _require_model_setting(data, "rework_model", primary_model)
+    rework_reasoning_effort = _require_reasoning_effort(
+        data, "rework_reasoning_effort", primary_reasoning_effort
     )
     validator_model = _require_model_setting(data, "validator_model", "gpt-5.6-terra")
     validator_reasoning_effort = _require_reasoning_effort(
@@ -264,6 +270,8 @@ def load_config(path: Path | None = None) -> Config:
         routine_reasoning_effort=routine_reasoning_effort,
         primary_model=primary_model,
         primary_reasoning_effort=primary_reasoning_effort,
+        rework_model=rework_model,
+        rework_reasoning_effort=rework_reasoning_effort,
         validator_model=validator_model,
         validator_reasoning_effort=validator_reasoning_effort,
         preflight_model=preflight_model,
@@ -319,30 +327,55 @@ def set_model_assignments(
     validator_model: str,
     preflight_model: str,
     config_path: Path | None = None,
+    routine_reasoning_effort: str | None = None,
+    primary_reasoning_effort: str | None = None,
+    rework_model: str | None = None,
+    rework_reasoning_effort: str | None = None,
+    validator_reasoning_effort: str | None = None,
+    preflight_reasoning_effort: str | None = None,
 ) -> Config:
     """Persist the role-specific model routing without rewriting unrelated settings."""
+    path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
+    current = load_config(path)
     assignments = {
         "routine_model": routine_model,
+        "routine_reasoning_effort": routine_reasoning_effort or current.routine_reasoning_effort,
         "primary_model": primary_model,
+        "primary_reasoning_effort": primary_reasoning_effort or current.primary_reasoning_effort,
+        "rework_model": rework_model or current.rework_model,
+        "rework_reasoning_effort": rework_reasoning_effort or current.rework_reasoning_effort,
         "validator_model": validator_model,
+        "validator_reasoning_effort": validator_reasoning_effort or current.validator_reasoning_effort,
         "preflight_model": preflight_model,
+        "preflight_reasoning_effort": preflight_reasoning_effort or current.preflight_reasoning_effort,
     }
-    if any(not _MODEL_ID_PATTERN.fullmatch(model) for model in assignments.values()):
+    model_settings = {
+        name: value for name, value in assignments.items() if name.endswith("_model")
+    }
+    if any(not _MODEL_ID_PATTERN.fullmatch(model) for model in model_settings.values()):
         raise ConfigError("model assignments must be valid model identifiers")
-    path = config_path or Path(os.environ.get("TELEGRAM_CODEX_CONFIG", DEFAULT_CONFIG_PATH))
+    if any(
+        effort not in _REASONING_EFFORTS
+        for name, effort in assignments.items()
+        if name.endswith("_reasoning_effort")
+    ):
+        allowed = ", ".join(sorted(_REASONING_EFFORTS))
+        raise ConfigError(f"reasoning efforts must be one of: {allowed}")
     try:
         original = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise ConfigError(f"cannot read config: {exc}") from exc
     updated = original
-    for setting, model in assignments.items():
+    for setting, value in assignments.items():
         updated, replacements = re.subn(
             rf'(?m)^{setting}\s*=\s*"(?:[^"\\\\]|\\\\.)*"\s*$',
-            f"{setting} = {json.dumps(model)}",
+            f"{setting} = {json.dumps(value)}",
             updated,
         )
-        if replacements != 1:
+        if replacements > 1:
             raise ConfigError(f"config must contain exactly one quoted {setting} setting")
+        if replacements == 0:
+            updated = updated.rstrip() + f"\n{setting} = {json.dumps(value)}\n"
     if updated == original:
         return load_config(path)
     atomic_write_text(path, updated)
@@ -643,6 +676,8 @@ def write_local_config(
             'routine_reasoning_effort = "medium"',
             'primary_model = "gpt-5.6-sol"',
             'primary_reasoning_effort = "high"',
+            'rework_model = "gpt-5.6-sol"',
+            'rework_reasoning_effort = "high"',
             'validator_model = "gpt-5.6-terra"',
             'validator_reasoning_effort = "high"',
             'preflight_model = "gpt-5.6-luna"',

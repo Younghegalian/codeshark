@@ -56,6 +56,83 @@ struct DashboardActivityLog: Decodable, Identifiable {
     }
 }
 
+struct DashboardModelUsage: Decodable, Identifiable {
+    let model: String
+    let reasoningEffort: String
+    let phase: String
+    let runs: Int
+    let completed: Int
+    let elapsedSeconds: Double
+
+    var id: String { "\(model)-\(reasoningEffort)-\(phase)" }
+
+    enum CodingKeys: String, CodingKey {
+        case model, phase, runs, completed
+        case reasoningEffort = "reasoning_effort"
+        case elapsedSeconds = "elapsed_seconds"
+    }
+}
+
+private struct CodexReasoningLevel: Decodable {
+    let effort: String
+}
+
+private struct CodexCachedModel: Decodable {
+    let slug: String
+    let visibility: String
+    let supportedReasoningLevels: [CodexReasoningLevel]
+
+    enum CodingKeys: String, CodingKey {
+        case slug, visibility
+        case supportedReasoningLevels = "supported_reasoning_levels"
+    }
+}
+
+private struct CodexModelCache: Decodable {
+    let models: [CodexCachedModel]
+}
+
+private struct CodexModelOption {
+    let slug: String
+    let reasoningEfforts: [String]
+}
+
+private let fallbackModelOptions = [
+    CodexModelOption(slug: "gpt-5.6-sol", reasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"]),
+    CodexModelOption(slug: "gpt-5.6-terra", reasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"]),
+    CodexModelOption(slug: "gpt-5.6-luna", reasoningEfforts: ["low", "medium", "high", "xhigh", "max"]),
+    CodexModelOption(slug: "gpt-5.5", reasoningEfforts: ["low", "medium", "high", "xhigh"]),
+    CodexModelOption(slug: "gpt-5.4", reasoningEfforts: ["low", "medium", "high", "xhigh"]),
+    CodexModelOption(slug: "gpt-5.4-mini", reasoningEfforts: ["low", "medium", "high", "xhigh"]),
+    CodexModelOption(slug: "gpt-5.4-nano", reasoningEfforts: ["low", "medium", "high", "xhigh"]),
+    CodexModelOption(slug: "gpt-5.3-codex-spark", reasoningEfforts: ["low", "medium", "high", "xhigh"]),
+    CodexModelOption(slug: "gpt-5.2", reasoningEfforts: ["low", "medium", "high", "xhigh"]),
+]
+
+private func availableModelOptions() -> [CodexModelOption] {
+    let cacheURL = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".codex/models_cache.json")
+    let cached = (try? Data(contentsOf: cacheURL))
+        .flatMap { try? JSONDecoder().decode(CodexModelCache.self, from: $0) }?.models ?? []
+    let cachedBySlug = Dictionary(uniqueKeysWithValues: cached.map { ($0.slug, $0) })
+    var options: [CodexModelOption] = []
+    var seen = Set<String>()
+    for fallback in fallbackModelOptions {
+        let efforts = cachedBySlug[fallback.slug]?.supportedReasoningLevels.map(\.effort)
+        options.append(CodexModelOption(slug: fallback.slug, reasoningEfforts: efforts ?? fallback.reasoningEfforts))
+        seen.insert(fallback.slug)
+    }
+    for model in cached where model.visibility == "list" && seen.insert(model.slug).inserted {
+        options.append(
+            CodexModelOption(
+                slug: model.slug,
+                reasoningEfforts: model.supportedReasoningLevels.map(\.effort)
+            )
+        )
+    }
+    return options
+}
+
 struct DashboardSnapshot: Decodable {
     let state: String
     let activeTaskCount: Int
@@ -66,6 +143,8 @@ struct DashboardSnapshot: Decodable {
     let recentArtifacts: [String]
     let lastFailure: DashboardFailure?
     let activityLog: [DashboardActivityLog]
+    let modelUsage5h: [DashboardModelUsage]
+    let modelUsage7d: [DashboardModelUsage]
 
     static let empty = DashboardSnapshot(
         state: "starting",
@@ -76,7 +155,9 @@ struct DashboardSnapshot: Decodable {
         activeTasks: [],
         recentArtifacts: [],
         lastFailure: nil,
-        activityLog: []
+        activityLog: [],
+        modelUsage5h: [],
+        modelUsage7d: []
     )
 
     enum CodingKeys: String, CodingKey {
@@ -89,6 +170,8 @@ struct DashboardSnapshot: Decodable {
         case recentArtifacts = "recent_artifacts"
         case lastFailure = "last_failure"
         case activityLog = "activity_log"
+        case modelUsage5h = "model_usage_5h"
+        case modelUsage7d = "model_usage_7d"
     }
 
     init(
@@ -100,7 +183,9 @@ struct DashboardSnapshot: Decodable {
         activeTasks: [DashboardTask],
         recentArtifacts: [String],
         lastFailure: DashboardFailure?,
-        activityLog: [DashboardActivityLog]
+        activityLog: [DashboardActivityLog],
+        modelUsage5h: [DashboardModelUsage],
+        modelUsage7d: [DashboardModelUsage]
     ) {
         self.state = state
         self.activeTaskCount = activeTaskCount
@@ -111,6 +196,8 @@ struct DashboardSnapshot: Decodable {
         self.recentArtifacts = recentArtifacts
         self.lastFailure = lastFailure
         self.activityLog = activityLog
+        self.modelUsage5h = modelUsage5h
+        self.modelUsage7d = modelUsage7d
     }
 
     init(from decoder: Decoder) throws {
@@ -124,6 +211,8 @@ struct DashboardSnapshot: Decodable {
         recentArtifacts = try container.decodeIfPresent([String].self, forKey: .recentArtifacts) ?? []
         lastFailure = try container.decodeIfPresent(DashboardFailure.self, forKey: .lastFailure)
         activityLog = try container.decodeIfPresent([DashboardActivityLog].self, forKey: .activityLog) ?? []
+        modelUsage5h = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage5h) ?? []
+        modelUsage7d = try container.decodeIfPresent([DashboardModelUsage].self, forKey: .modelUsage7d) ?? []
     }
 }
 
@@ -291,152 +380,239 @@ struct ExecutionLogView: View {
     }
 }
 
+private struct ModelUsageGroup: Identifiable {
+    let model: String
+    let reasoningEffort: String
+    let runs: Int
+    let completed: Int
+    let elapsedSeconds: Double
+
+    var id: String { "\(model)-\(reasoningEffort)" }
+}
+
+struct ModelUsageView: View {
+    @ObservedObject var model: DashboardModel
+    let close: () -> Void
+    @State private var period = 0
+
+    private var entries: [DashboardModelUsage] {
+        period == 0 ? model.snapshot.modelUsage5h : model.snapshot.modelUsage7d
+    }
+
+    private var groups: [ModelUsageGroup] {
+        let grouped = Dictionary(grouping: entries) {
+            "\($0.model)-\($0.reasoningEffort)"
+        }
+        return grouped.values.map { entries in
+            ModelUsageGroup(
+                model: entries[0].model,
+                reasoningEffort: entries[0].reasoningEffort,
+                runs: entries.reduce(0) { $0 + $1.runs },
+                completed: entries.reduce(0) { $0 + $1.completed },
+                elapsedSeconds: entries.reduce(0) { $0 + $1.elapsedSeconds }
+            )
+        }
+        .sorted { $0.elapsedSeconds > $1.elapsedSeconds }
+    }
+
+    private var totalElapsedSeconds: Double {
+        groups.reduce(0) { $0 + $1.elapsedSeconds }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Model Usage")
+                    .font(.headline)
+                Text("Recorded execution contribution, not account quota.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("Period", selection: $period) {
+                Text("Last 5 hours").tag(0)
+                Text("Last 7 days").tag(1)
+            }
+            .pickerStyle(.segmented)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 11) {
+                    if groups.isEmpty {
+                        Label("No recorded model phases", systemImage: "chart.bar")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(groups) { group in
+                            let share = totalElapsedSeconds > 0
+                                ? Int((group.elapsedSeconds / totalElapsedSeconds * 100).rounded())
+                                : 0
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(compactModelName(group.model))
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(group.reasoningEffort)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text("\(share)%")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text("\(group.runs) phases · \(group.completed) completed · \(elapsedText(Int(group.elapsedSeconds)))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                ProgressView(value: totalElapsedSeconds > 0 ? group.elapsedSeconds / totalElapsedSeconds : 0)
+                            }
+                            .padding(10)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            HStack {
+                Text("Quota attribution is not exposed by Codex.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button("Close", action: close)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .padding(16)
+        .frame(width: 430, height: 410)
+    }
+}
+
 struct DashboardView: View {
     @ObservedObject var model: DashboardModel
     let chooseWorkspace: () -> Void
     let configureModels: () -> Void
+    let showUsage: () -> Void
     let showLogs: () -> Void
     let close: () -> Void
     let quit: () -> Void
 
     private var snapshot: DashboardSnapshot { model.snapshot }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "terminal.fill")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.tint)
-                    .frame(width: 30, height: 30)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 9))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Codeshark")
-                        .font(.headline)
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(statusColor(for: snapshot))
-                            .frame(width: 7, height: 7)
-                        Text(statusTitle(for: snapshot))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+    private var usageSummary: String {
+        let recent = snapshot.modelUsage5h.reduce(0) { $0 + $1.runs }
+        let weekly = snapshot.modelUsage7d.reduce(0) { $0 + $1.runs }
+        return "5h \(recent) phases · 7d \(weekly) phases"
+    }
+
+    @ViewBuilder
+    private func menuAction(
+        _ title: String,
+        subtitle: String? = nil,
+        showsChevron: Bool = true,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.body.weight(.medium))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(destructive ? Color.red.opacity(0.7) : Color.secondary)
+                            .lineLimit(1)
                     }
                 }
                 Spacer()
-                if snapshot.queueCount > 0 {
-                    Text("Queue \(snapshot.queueCount)")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.quaternary, in: Capsule())
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(destructive ? Color.red : Color.secondary)
                 }
             }
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if !snapshot.modelAssignments.isEmpty {
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack {
-                                Text("MODEL ROUTING")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Button("Configure…", action: configureModels)
-                                    .buttonStyle(.borderless)
-                                    .font(.caption)
-                            }
-                            ForEach(snapshot.modelAssignments) { assignment in
-                                HStack(spacing: 6) {
-                                    Text(compactModelName(assignment.model))
-                                        .font(.caption.weight(.semibold))
-                                    Text(assignment.role)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    Text(assignment.reasoningEffort)
-                                        .font(.caption2.monospaced())
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                    }
-
-                    if snapshot.activeTasks.isEmpty {
-                        Label("Ready for a request", systemImage: "checkmark.circle")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("CURRENT WORK")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            ForEach(snapshot.activeTasks) { task in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(task.phase)
-                                            .font(.subheadline.weight(.semibold))
-                                        Spacer()
-                                        Text(elapsedText(task.elapsedSeconds))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text("\(task.project) · \(task.model) · \(task.reasoningEffort)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(10)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
-                    }
-
-                    if !snapshot.recentArtifacts.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("RECENT DELIVERY")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            ForEach(snapshot.recentArtifacts, id: \.self) { artifact in
-                                Label(artifact, systemImage: "doc")
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    if let failure = snapshot.lastFailure {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Label("Last task needs attention", systemImage: "exclamationmark.triangle")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.orange)
-                            Text(failure.message)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        .padding(10)
-                        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-                    }
-                }
-            }
-
-            Divider()
-
-            HStack(spacing: 8) {
-                Button("Set Workspace…", action: chooseWorkspace)
-                    .buttonStyle(.bordered)
-                Button("Logs", action: showLogs)
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("Close", action: close)
-                    .buttonStyle(.bordered)
-                Button("Quit", role: .destructive, action: quit)
-                    .buttonStyle(.bordered)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
         }
-        .padding(14)
-        .frame(width: 340, height: 320)
+        .buttonStyle(.plain)
+        .foregroundStyle(destructive ? Color.red : Color.primary)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(statusColor(for: snapshot))
+                    .frame(width: 10, height: 10)
+                Text("Codeshark is \(statusTitle(for: snapshot).lowercased())")
+                    .font(.body.weight(.semibold))
+                Spacer()
+            }
+
+            Divider()
+
+            if snapshot.activeTasks.isEmpty {
+                Text("Ready")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Running")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(snapshot.activeTasks.prefix(1))) { task in
+                        Text(task.phase)
+                            .font(.body.weight(.medium))
+                        Text("\(task.project) · \(compactModelName(task.model)) · \(task.reasoningEffort) · \(elapsedText(task.elapsedSeconds))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    if snapshot.activeTasks.count > 1 {
+                        Text("\(snapshot.activeTasks.count - 1) more task(s) running")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if !snapshot.recentArtifacts.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Recent")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(snapshot.recentArtifacts, id: \.self) { artifact in
+                        Text(artifact)
+                            .font(.body.weight(.medium))
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Divider()
+
+            menuAction("Model Routing", action: configureModels)
+            menuAction("Usage", subtitle: usageSummary, action: showUsage)
+            menuAction("Workspace", action: chooseWorkspace)
+            menuAction("Logs", action: showLogs)
+
+            if let failure = snapshot.lastFailure {
+                Divider()
+                Text("Last task: \(failure.message)")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+
+            Divider()
+
+            menuAction("Close Menu", showsChevron: false, action: close)
+            Divider()
+            menuAction("Quit Codeshark", showsChevron: false, destructive: true, action: quit)
+        }
+        .padding(16)
+        .frame(width: 340, height: 500)
     }
 }
 
@@ -447,8 +623,11 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private let popover = NSPopover()
     private let dashboard: DashboardModel
     private var logPanel: NSPanel?
+    private var usagePanel: NSPanel?
     private var modelRoutingPanel: NSPanel?
     private var modelPickers: [String: NSPopUpButton] = [:]
+    private var reasoningPickers: [String: NSPopUpButton] = [:]
+    private var modelOptions: [CodexModelOption] = []
 
     init(projectRoot: String, iconPath: String) {
         self.projectRoot = projectRoot
@@ -459,12 +638,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 340, height: 320)
+        popover.contentSize = NSSize(width: 340, height: 500)
         popover.contentViewController = NSHostingController(
             rootView: DashboardView(
                 model: dashboard,
                 chooseWorkspace: { [weak self] in self?.chooseWorkspace() },
                 configureModels: { [weak self] in self?.configureModels() },
+                showUsage: { [weak self] in self?.showUsage() },
                 showLogs: { [weak self] in self?.showLogs() },
                 close: { [weak self] in self?.closePopover() },
                 quit: { [weak self] in self?.quitCodeshark() }
@@ -539,7 +719,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 400),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -552,37 +732,64 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Model Routing")
         title.font = .systemFont(ofSize: 17, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 267, width: 390, height: 24)
+        title.frame = NSRect(x: 20, y: 347, width: 580, height: 24)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Choose the model assigned to each role. Applying restarts Codeshark.")
+        let detail = NSTextField(wrappingLabelWithString: "Choose a model and a supported reasoning effort for each role. Applying restarts Codeshark.")
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 228, width: 390, height: 34)
+        detail.frame = NSRect(x: 20, y: 305, width: 580, height: 34)
         content.addSubview(detail)
 
+        let modelHeader = NSTextField(labelWithString: "MODEL")
+        modelHeader.font = .systemFont(ofSize: 11, weight: .semibold)
+        modelHeader.textColor = .secondaryLabelColor
+        modelHeader.frame = NSRect(x: 185, y: 278, width: 235, height: 16)
+        content.addSubview(modelHeader)
+        let effortHeader = NSTextField(labelWithString: "REASONING")
+        effortHeader.font = .systemFont(ofSize: 11, weight: .semibold)
+        effortHeader.textColor = .secondaryLabelColor
+        effortHeader.frame = NSRect(x: 430, y: 278, width: 170, height: 16)
+        content.addSubview(effortHeader)
+
         let roles = [
-            ("Routine", "Routine", "gpt-5.6-luna"),
-            ("Preflight", "Preflight", "gpt-5.6-luna"),
-            ("Primary / Rework", "Primary · Rework", "gpt-5.6-sol"),
-            ("Validation / Feedback", "Validation · Feedback", "gpt-5.6-terra"),
+            ("Routine", "Routine", "gpt-5.6-luna", "medium"),
+            ("Preflight", "Preflight", "gpt-5.6-luna", "low"),
+            ("Primary", "Primary", "gpt-5.6-sol", "high"),
+            ("Rework", "Rework", "gpt-5.6-sol", "high"),
+            ("Validation / Feedback", "Validation · Feedback", "gpt-5.6-terra", "high"),
         ]
+        modelOptions = availableModelOptions()
         modelPickers = [:]
+        reasoningPickers = [:]
         for (index, role) in roles.enumerated() {
-            let y = 190 - (index * 36)
+            let y = 235 - (index * 38)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 13, weight: .medium)
-            label.frame = NSRect(x: 20, y: y + 4, width: 170, height: 20)
+            label.frame = NSRect(x: 20, y: y + 4, width: 155, height: 20)
             content.addSubview(label)
 
             let current = dashboard.snapshot.modelAssignments
                 .first(where: { $0.role == role.1 })?.model ?? role.2
-            let picker = modelPicker(current, frame: NSRect(x: 195, y: y, width: 215, height: 28))
-            content.addSubview(picker)
-            modelPickers[role.1] = picker
+            let currentEffort = dashboard.snapshot.modelAssignments
+                .first(where: { $0.role == role.1 })?.reasoningEffort ?? role.3
+            let modelPicker = modelPicker(
+                current,
+                role: role.1,
+                frame: NSRect(x: 185, y: y, width: 235, height: 28)
+            )
+            let effortPicker = reasoningPicker(
+                model: current,
+                current: currentEffort,
+                frame: NSRect(x: 430, y: y, width: 170, height: 28)
+            )
+            content.addSubview(modelPicker)
+            content.addSubview(effortPicker)
+            modelPickers[role.1] = modelPicker
+            reasoningPickers[role.1] = effortPicker
         }
 
-        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 390, height: 1))
+        let separator = NSBox(frame: NSRect(x: 20, y: 53, width: 580, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
 
@@ -594,7 +801,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyModelRouting))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 320, y: 15, width: 90, height: 28)
+        apply.frame = NSRect(x: 510, y: 15, width: 90, height: 28)
         content.addSubview(apply)
 
         panel.contentView = content
@@ -604,15 +811,56 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         modelRoutingPanel = panel
     }
 
-    private func modelPicker(_ current: String, frame: NSRect) -> NSPopUpButton {
+    private func modelPicker(_ current: String, role: String, frame: NSRect) -> NSPopUpButton {
         let picker = NSPopUpButton(frame: frame, pullsDown: false)
-        var models = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
-        if !models.contains(current) {
-            models.insert(current, at: 0)
+        var options = modelOptions
+        if !options.contains(where: { $0.slug == current }) {
+            options.insert(
+                CodexModelOption(
+                    slug: current,
+                    reasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"]
+                ),
+                at: 0
+            )
         }
-        picker.addItems(withTitles: models)
-        picker.selectItem(withTitle: current)
+        for option in options {
+            picker.addItem(withTitle: option.slug)
+            picker.lastItem?.representedObject = option.slug
+        }
+        picker.selectItem(at: options.firstIndex(where: { $0.slug == current }) ?? 0)
+        picker.identifier = NSUserInterfaceItemIdentifier(role)
+        picker.target = self
+        picker.action = #selector(modelSelectionChanged(_:))
         return picker
+    }
+
+    private func reasoningPicker(model: String, current: String, frame: NSRect) -> NSPopUpButton {
+        let picker = NSPopUpButton(frame: frame, pullsDown: false)
+        configureReasoningPicker(picker, model: model, current: current)
+        return picker
+    }
+
+    private func configureReasoningPicker(_ picker: NSPopUpButton, model: String, current: String?) {
+        let option = modelOptions.first(where: { $0.slug == model })
+        let efforts = option?.reasoningEfforts ?? ["low", "medium", "high", "xhigh", "max", "ultra"]
+        picker.removeAllItems()
+        picker.addItems(withTitles: efforts)
+        let selected = current.flatMap { efforts.contains($0) ? $0 : nil } ?? efforts.first ?? "medium"
+        picker.selectItem(withTitle: selected)
+    }
+
+    private func selectedModel(_ picker: NSPopUpButton) -> String? {
+        picker.selectedItem?.representedObject as? String ?? picker.titleOfSelectedItem
+    }
+
+    @objc private func modelSelectionChanged(_ sender: NSPopUpButton) {
+        guard let role = sender.identifier?.rawValue,
+              let model = selectedModel(sender),
+              let effortPicker = reasoningPickers[role]
+        else {
+            return
+        }
+        configureReasoningPicker(effortPicker, model: model, current: effortPicker.titleOfSelectedItem)
     }
 
     @objc private func closeModelRouting() {
@@ -620,10 +868,21 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func applyModelRouting() {
-        guard let routine = modelPickers["Routine"]?.titleOfSelectedItem,
-              let preflight = modelPickers["Preflight"]?.titleOfSelectedItem,
-              let primary = modelPickers["Primary · Rework"]?.titleOfSelectedItem,
-              let validator = modelPickers["Validation · Feedback"]?.titleOfSelectedItem
+        guard let routinePicker = modelPickers["Routine"],
+              let routine = selectedModel(routinePicker),
+              let routineEffort = reasoningPickers["Routine"]?.titleOfSelectedItem,
+              let preflightPicker = modelPickers["Preflight"],
+              let preflight = selectedModel(preflightPicker),
+              let preflightEffort = reasoningPickers["Preflight"]?.titleOfSelectedItem,
+              let primaryPicker = modelPickers["Primary"],
+              let primary = selectedModel(primaryPicker),
+              let primaryEffort = reasoningPickers["Primary"]?.titleOfSelectedItem,
+              let reworkPicker = modelPickers["Rework"],
+              let rework = selectedModel(reworkPicker),
+              let reworkEffort = reasoningPickers["Rework"]?.titleOfSelectedItem,
+              let validatorPicker = modelPickers["Validation · Feedback"],
+              let validator = selectedModel(validatorPicker),
+              let validatorEffort = reasoningPickers["Validation · Feedback"]?.titleOfSelectedItem
         else {
             showError("Could not read the selected model routing.")
             return
@@ -632,10 +891,45 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         runServiceCommand([
             "set-models",
             "--routine", routine,
+            "--routine-effort", routineEffort,
             "--preflight", preflight,
+            "--preflight-effort", preflightEffort,
             "--primary", primary,
+            "--primary-effort", primaryEffort,
+            "--rework", rework,
+            "--rework-effort", reworkEffort,
             "--validator", validator,
+            "--validator-effort", validatorEffort,
         ])
+    }
+
+    private func showUsage() {
+        dashboard.refresh()
+        if let panel = usagePanel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 430, height: 410),
+            styleMask: [.titled, .closable, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Codeshark Model Usage"
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.delegate = self
+        panel.contentViewController = NSHostingController(
+            rootView: ModelUsageView(
+                model: dashboard,
+                close: { [weak self] in self?.usagePanel?.close() }
+            )
+        )
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        usagePanel = panel
     }
 
     private func showLogs() {
@@ -673,6 +967,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         if window == modelRoutingPanel {
             modelRoutingPanel = nil
             modelPickers = [:]
+            reasoningPickers = [:]
+            modelOptions = []
+        } else if window == usagePanel {
+            usagePanel = nil
         } else if window == logPanel {
             logPanel = nil
         }

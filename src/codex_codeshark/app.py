@@ -359,6 +359,14 @@ class AgentApp:
             )
             for worker_index in range(config.worker_count)
         )
+        self._rework_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.rework_model,
+                reasoning_effort=self.config.rework_reasoning_effort,
+            )
+            for worker_index in range(config.worker_count)
+        )
         self._subagent_runners = tuple(
             self._build_runner(
                 worker_index,
@@ -422,6 +430,7 @@ class AgentApp:
                 )
             latest_failure = self.store.latest_failure()
             model_usage = self.store.model_run_summaries(since=now - 5 * 60 * 60)
+            weekly_model_usage = self.store.model_run_summaries(since=now - 7 * 24 * 60 * 60)
             activity_log = self.store.recent_model_runs(limit=20)
             atomic_write_text(
                 self.config.state_path.parent / "menu-status.json",
@@ -444,8 +453,13 @@ class AgentApp:
                             },
                             {
                                 "model": self.config.primary_model,
-                                "role": "Primary · Rework",
+                                "role": "Primary",
                                 "reasoning_effort": self.config.primary_reasoning_effort,
+                            },
+                            {
+                                "model": self.config.rework_model,
+                                "role": "Rework",
+                                "reasoning_effort": self.config.rework_reasoning_effort,
                             },
                             {
                                 "model": self.config.validator_model,
@@ -464,7 +478,7 @@ class AgentApp:
                             if latest_failure is not None
                             else None
                         ),
-                        "model_usage": [
+                        "model_usage_5h": [
                             {
                                 "model": summary.model,
                                 "reasoning_effort": summary.reasoning_effort,
@@ -473,7 +487,18 @@ class AgentApp:
                                 "completed": summary.completed,
                                 "elapsed_seconds": round(summary.elapsed_seconds, 1),
                             }
-                            for summary in model_usage[:4]
+                            for summary in model_usage
+                        ],
+                        "model_usage_7d": [
+                            {
+                                "model": summary.model,
+                                "reasoning_effort": summary.reasoning_effort,
+                                "phase": summary.phase,
+                                "runs": summary.runs,
+                                "completed": summary.completed,
+                                "elapsed_seconds": round(summary.elapsed_seconds, 1),
+                            }
+                            for summary in weekly_model_usage
                         ],
                         "activity_log": [
                             {
@@ -621,10 +646,11 @@ class AgentApp:
         self.api.set_commands()
         self.store.recover_interrupted_tasks()
         LOGGER.info("starting @%s", identity.get("username", "unknown"))
-        for worker_index, (runner, primary_runner, subagent_runner, preflight_runner) in enumerate(
+        for worker_index, (runner, primary_runner, rework_runner, subagent_runner, preflight_runner) in enumerate(
             zip(
                 self._worker_runners,
                 self._primary_runners,
+                self._rework_runners,
                 self._subagent_runners,
                 self._preflight_runners,
                 strict=True,
@@ -633,7 +659,7 @@ class AgentApp:
         ):
             threading.Thread(
                 target=self._worker,
-                args=(runner, primary_runner, subagent_runner, preflight_runner),
+                args=(runner, primary_runner, rework_runner, subagent_runner, preflight_runner),
                 name=f"codex-worker-{worker_index}",
                 daemon=True,
             ).start()
@@ -1067,6 +1093,7 @@ class AgentApp:
         self,
         runner: CodexRunner,
         primary_runner: CodexRunner,
+        rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
         preflight_runner: CodexRunner,
     ) -> None:
@@ -1094,6 +1121,7 @@ class AgentApp:
                     subagent_runner,
                     preflight_runner,
                     primary_runner=primary_runner,
+                    rework_runner=rework_runner,
                 )
                 if result.cancelled:
                     status = "cancelled"
@@ -1137,11 +1165,13 @@ class AgentApp:
         preflight_runner: CodexRunner | None = None,
         *,
         primary_runner: CodexRunner | None = None,
+        rework_runner: CodexRunner | None = None,
     ) -> RunResult:
         runner = runner or self.runner
         subagent_runner = subagent_runner or runner
         preflight_runner = preflight_runner or subagent_runner
         primary_runner = primary_runner or runner
+        rework_runner = rework_runner or primary_runner
         project, request = unpack_project_task(task.prompt) if not task.restricted else (
             DEFAULT_PROJECT,
             task.prompt,
@@ -1254,6 +1284,7 @@ class AgentApp:
             )
             result = self._run_cross_validation_workflow(
                 primary_runner,
+                rework_runner,
                 subagent_runner,
                 preflight_runner,
                 prompt,
@@ -1983,6 +2014,7 @@ class AgentApp:
     def _run_cross_validation_workflow(
         self,
         runner: CodexRunner,
+        rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
         preflight_runner: CodexRunner,
         prompt: str,
@@ -2080,6 +2112,7 @@ class AgentApp:
         if plan.feedback_iterations:
             return self._run_feedback_loop(
                 runner,
+                rework_runner,
                 subagent_runner,
                 request=request,
                 primary_thread_id=primary_result.thread_id,
@@ -2165,7 +2198,8 @@ class AgentApp:
 
     def _run_feedback_loop(
         self,
-        runner: CodexRunner,
+        primary_runner: CodexRunner,
+        rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
         *,
         request: str,
@@ -2183,7 +2217,7 @@ class AgentApp:
             rework_result = self._run_model_phase(
                 task_id=task_id,
                 phase="rework",
-                runner=runner,
+                runner=rework_runner,
                 prompt=self._cross_reconciliation_prompt(findings, final=False),
                 thread_id=primary_thread_id,
                 ephemeral=False,
@@ -2211,7 +2245,7 @@ class AgentApp:
                 return self._run_model_phase(
                     task_id=task_id,
                     phase="feedback-recovery",
-                    runner=runner,
+                    runner=rework_runner,
                     prompt=self._cross_validation_recovery_prompt(failed_sessions),
                     thread_id=primary_thread_id,
                     ephemeral=False,
@@ -2228,7 +2262,7 @@ class AgentApp:
                 return self._run_model_phase(
                     task_id=task_id,
                     phase="finalization",
-                    runner=runner,
+                    runner=primary_runner,
                     prompt=final_prompt,
                     thread_id=primary_thread_id,
                     ephemeral=False,
@@ -2243,7 +2277,7 @@ class AgentApp:
         return self._run_model_phase(
             task_id=task_id,
             phase="feedback-exhausted",
-            runner=runner,
+            runner=primary_runner,
             prompt=recovery_prompt,
             thread_id=primary_thread_id,
             ephemeral=False,

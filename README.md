@@ -193,13 +193,15 @@ worker_count = 8
 
 Persistent tasks from one chat still run in order to protect that chat's Codex session. Isolated group requests from different members may use separate worker slots.
 
-Codeshark uses Luna for routine requests and task preflight, Terra for focused work and independent validation, and Sol only for the primary/reconciliation path of cross-validated work. All stages are capped at `high`; the dedicated profile disables Fast mode.
+Codeshark defaults to Luna for routine requests and task preflight, Terra for focused work and independent validation, and Sol for the primary, rework, and reconciliation path of cross-validated work. The dashboard lets an administrator choose each role's model and a supported reasoning effort; the dedicated profile disables Fast mode.
 
 ```toml
 routine_model = "gpt-5.6-luna"
 routine_reasoning_effort = "medium"
 primary_model = "gpt-5.6-sol"
 primary_reasoning_effort = "high"
+rework_model = "gpt-5.6-sol"
+rework_reasoning_effort = "high"
 validator_model = "gpt-5.6-terra"
 validator_reasoning_effort = "high"
 preflight_model = "gpt-5.6-luna"
