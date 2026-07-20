@@ -47,11 +47,14 @@ class FakeCodexRunner:
         result: RunResult | None = None,
         *,
         triage_message: str | None = None,
+        project_triage_message: str | None = None,
     ) -> None:
         self.model = "test-model"
         self.prompts = []
         self.triage_prompts = []
+        self.project_triage_prompts = []
         self.triage_message = triage_message
+        self.project_triage_message = project_triage_message
         self.deleted_sessions = []
         self.delete_error = None
         self.steers = []
@@ -75,6 +78,17 @@ class FakeCodexRunner:
         approved=False,
         full_access=False,
     ) -> RunResult:
+        if prompt.startswith("[Codeshark project selection]"):
+            self.project_triage_prompts.append(
+                (prompt, thread_id, ephemeral, restricted, approved, full_access)
+            )
+            return RunResult(
+                exit_code=0,
+                message=self.project_triage_message
+                or '{"project": "__GENERAL__", "confidence": "low"}',
+                thread_id=None,
+                stderr="",
+            )
         if prompt.startswith("[Codeshark task triage]"):
             self.triage_prompts.append((prompt, thread_id, ephemeral, restricted, approved, full_access))
             return RunResult(
@@ -969,6 +983,45 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.app._handle_update(self.update(123, "/good"))
         self.assertIn("no completed task", self.api.messages[-1][1].lower())
+
+    def test_project_path_is_classified_before_task_context_is_composed(self) -> None:
+        (self.config.workdir / "gnw_transport_paper").mkdir()
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(
+            self.update(123, "Review workspace/gnw_transport_paper/main.tex and report issues.")
+        )
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(runner.project_triage_prompts, [])
+        self.assertEqual(self.app.state.active_project(123), "gnw_transport_paper")
+        self.assertTrue(
+            any("Project: gnw_transport_paper" in prompt[0] for prompt in runner.prompts)
+        )
+        manifest = self.app.store.get_task_manifest(task.id)
+        self.assertIsNotNone(manifest)
+        self.assertEqual(manifest.project, "gnw_transport_paper")
+
+    def test_unclassified_task_uses_bounded_project_triage(self) -> None:
+        (self.config.workdir / "FETM").mkdir()
+        runner = FakeCodexRunner(
+            project_triage_message='{"project": "FETM", "confidence": "high"}'
+        )
+        self.app.runner = runner
+
+        self.app._handle_update(self.update(123, "Analyze these gas transport measurements."))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(len(runner.project_triage_prompts), 1)
+        self.assertTrue(runner.project_triage_prompts[0][2])
+        self.assertEqual(self.app.state.active_project(123), "FETM")
+        self.assertIn("Project: FETM", runner.prompts[0][0])
+        manifest = self.app.store.get_task_manifest(task.id)
+        self.assertIsNotNone(manifest)
+        self.assertEqual(manifest.project, "FETM")
 
     def test_unsuccessful_tasks_are_not_available_for_feedback(self) -> None:
         results = [
