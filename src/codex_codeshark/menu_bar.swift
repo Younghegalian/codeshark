@@ -3,7 +3,7 @@ import Cocoa
 final class CodesharkStatusBar: NSObject, NSApplicationDelegate {
     private let projectRoot: String
     private let iconPath: String
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: 32)
     private let summaryItem = NSMenuItem(title: "Codeshark: starting", action: nil, keyEquivalent: "")
 
     init(projectRoot: String, iconPath: String) {
