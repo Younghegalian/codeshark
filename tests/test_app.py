@@ -316,6 +316,35 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(task.source, "telegram-group")
         self.assertEqual(self.api.messages, [])
 
+    def test_group_member_requests_can_be_disabled_without_affecting_administrator(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.config = replace(self.config, group_member_requests_enabled=False)
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+
+        self.assertIsNone(self.app.store.claim_next_task())
+        self.assertIn("currently disabled", self.api.messages[-1][1])
+
+        self.app._handle_update(
+            self.update(
+                123,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.assertFalse(task.restricted)
+
     def test_group_member_can_reply_to_a_codeshark_message_without_a_mention(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
@@ -740,6 +769,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["security"]["group_workspace_write"], self.config.group_workspace_write
+        )
+        self.assertEqual(
+            payload["security"]["group_member_requests_enabled"],
+            self.config.group_member_requests_enabled,
         )
         self.assertEqual(payload["model_assignments"][3]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["model_assignments"][1]["role"], "Planner / Triage")

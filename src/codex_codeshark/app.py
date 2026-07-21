@@ -684,6 +684,7 @@ class AgentApp:
                             "admin_auto_approve_actions": self.config.admin_auto_approve_actions,
                             "admin_mcp_enabled": self.config.admin_mcp_enabled,
                             "admin_delegated_write_access": self.config.admin_delegated_write_access,
+                            "group_member_requests_enabled": self.config.group_member_requests_enabled,
                             "group_network_access": self.config.group_network_access,
                             "group_workspace_write": self.config.group_workspace_write,
                             "telegram": "Keychain credential · one paired administrator",
@@ -1371,6 +1372,13 @@ class AgentApp:
             self._enqueue_user_task(
                 chat_id,
                 request,
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
+        if not self.config.group_member_requests_enabled:
+            self._send_message(
+                chat_id,
+                "Non-administrator requests are currently disabled for this group.",
                 reply_to_message_id=reply_to_message_id,
             )
             return

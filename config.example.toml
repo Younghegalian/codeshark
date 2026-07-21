@@ -67,6 +67,16 @@ codex_network_access = false
 # In an enabled group, the paired administrator retains these capabilities. Other
 # members remain confined to the separate group sandbox with MCP disabled.
 admin_full_access = false
+# Administrator-only controls. These apply in private chat and administrator-enabled
+# groups; normal members never inherit them.
+admin_auto_approve_actions = false
+admin_mcp_enabled = true
+admin_delegated_write_access = true
+# Non-administrator group controls. Requests must still directly address Codeshark
+# and stay in the server-controlled group sandbox with MCP disabled.
+group_member_requests_enabled = true
+group_network_access = true
+group_workspace_write = true
 attachment_max_bytes = 10000000
 # Private administrator tasks may inspect, but never write, under these server-controlled roots.
 # Non-administrator group tasks cannot see these paths.

@@ -60,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     security.add_argument("--admin-auto-approve-actions", required=True, choices=("true", "false"))
     security.add_argument("--admin-mcp-enabled", required=True, choices=("true", "false"))
     security.add_argument("--admin-delegated-write-access", required=True, choices=("true", "false"))
+    security.add_argument("--group-member-requests-enabled", required=True, choices=("true", "false"))
     security.add_argument("--group-network-access", required=True, choices=("true", "false"))
     security.add_argument("--group-workspace-write", required=True, choices=("true", "false"))
     local_history_parser = commands.add_parser("local-history", help=argparse.SUPPRESS)
@@ -166,6 +167,7 @@ def main() -> int:
                 admin_auto_approve_actions=args.admin_auto_approve_actions == "true",
                 admin_mcp_enabled=args.admin_mcp_enabled == "true",
                 admin_delegated_write_access=args.admin_delegated_write_access == "true",
+                group_member_requests_enabled=args.group_member_requests_enabled == "true",
                 group_network_access=args.group_network_access == "true",
                 group_workspace_write=args.group_workspace_write == "true",
             )
@@ -176,6 +178,7 @@ def main() -> int:
                 f"administrator={'full' if config.admin_full_access else 'workspace'}, "
                 f"auto-approval={'enabled' if config.admin_auto_approve_actions else 'required'}, "
                 f"MCP={'enabled' if config.admin_mcp_enabled else 'disabled'}, "
+                f"group-requests={'enabled' if config.group_member_requests_enabled else 'disabled'}, "
                 f"group-network={'enabled' if config.group_network_access else 'disabled'}, "
                 f"group-write={'enabled' if config.group_workspace_write else 'read-only'}"
             )

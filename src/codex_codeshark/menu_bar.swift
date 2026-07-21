@@ -144,6 +144,7 @@ struct DashboardSecurity: Decodable {
     let adminAutoApproveActions: Bool
     let adminMcpEnabled: Bool
     let adminDelegatedWriteAccess: Bool
+    let groupMemberRequestsEnabled: Bool
     let groupNetworkAccess: Bool
     let groupWorkspaceWrite: Bool
     let telegram: String
@@ -156,6 +157,7 @@ struct DashboardSecurity: Decodable {
         case adminAutoApproveActions = "admin_auto_approve_actions"
         case adminMcpEnabled = "admin_mcp_enabled"
         case adminDelegatedWriteAccess = "admin_delegated_write_access"
+        case groupMemberRequestsEnabled = "group_member_requests_enabled"
         case groupNetworkAccess = "group_network_access"
         case groupWorkspaceWrite = "group_workspace_write"
     }
@@ -167,6 +169,7 @@ struct DashboardSecurity: Decodable {
         adminAutoApproveActions: Bool,
         adminMcpEnabled: Bool,
         adminDelegatedWriteAccess: Bool,
+        groupMemberRequestsEnabled: Bool,
         groupNetworkAccess: Bool,
         groupWorkspaceWrite: Bool,
         telegram: String,
@@ -178,6 +181,7 @@ struct DashboardSecurity: Decodable {
         self.adminAutoApproveActions = adminAutoApproveActions
         self.adminMcpEnabled = adminMcpEnabled
         self.adminDelegatedWriteAccess = adminDelegatedWriteAccess
+        self.groupMemberRequestsEnabled = groupMemberRequestsEnabled
         self.groupNetworkAccess = groupNetworkAccess
         self.groupWorkspaceWrite = groupWorkspaceWrite
         self.telegram = telegram
@@ -192,6 +196,7 @@ struct DashboardSecurity: Decodable {
         adminAutoApproveActions = try container.decodeIfPresent(Bool.self, forKey: .adminAutoApproveActions) ?? adminFullAccess
         adminMcpEnabled = try container.decodeIfPresent(Bool.self, forKey: .adminMcpEnabled) ?? true
         adminDelegatedWriteAccess = try container.decodeIfPresent(Bool.self, forKey: .adminDelegatedWriteAccess) ?? true
+        groupMemberRequestsEnabled = try container.decodeIfPresent(Bool.self, forKey: .groupMemberRequestsEnabled) ?? true
         groupNetworkAccess = try container.decodeIfPresent(Bool.self, forKey: .groupNetworkAccess) ?? true
         groupWorkspaceWrite = try container.decodeIfPresent(Bool.self, forKey: .groupWorkspaceWrite) ?? true
         telegram = try container.decodeIfPresent(String.self, forKey: .telegram) ?? "Keychain credential"
@@ -2253,6 +2258,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var securityAdminAutoApprove: NSButton?
     private var securityAdminMcp: NSButton?
     private var securityAdminDelegatedWrite: NSButton?
+    private var securityGroupMemberRequests: NSButton?
     private var securityGroupNetwork: NSButton?
     private var securityGroupWorkspaceWrite: NSButton?
     private var modelPickers: [String: NSPopUpButton] = [:]
@@ -2507,22 +2513,22 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 
     @objc private func openSettingsWorkspace() {
-        settingsPanel?.close()
+        settingsPanel?.orderOut(nil)
         chooseWorkspace()
     }
 
     @objc private func openSettingsModels() {
-        settingsPanel?.close()
+        settingsPanel?.orderOut(nil)
         configureModels()
     }
 
     @objc private func openSettingsOrchestration() {
-        settingsPanel?.close()
+        settingsPanel?.orderOut(nil)
         configureOrchestration()
     }
 
     @objc private func openSettingsSecurity() {
-        settingsPanel?.close()
+        settingsPanel?.orderOut(nil)
         configureSecurity()
     }
 
@@ -2540,13 +2546,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             adminAutoApproveActions: false,
             adminMcpEnabled: true,
             adminDelegatedWriteAccess: true,
+            groupMemberRequestsEnabled: true,
             groupNetworkAccess: true,
             groupWorkspaceWrite: true,
             telegram: "Keychain credential · one paired administrator",
             groups: []
         )
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 740, height: 690),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2559,23 +2566,24 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Security Settings")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 558, width: 660, height: 21)
+        title.frame = NSRect(x: 20, y: 648, width: 700, height: 21)
         content.addSubview(title)
-        let detail = NSTextField(wrappingLabelWithString: "Each switch has an independent effect. Changes save now and apply after active work finishes; the menu bar remains available.")
+        let detail = NSTextField(wrappingLabelWithString: "Changes save now and apply after active work finishes. Administrator and group-member permissions are intentionally separate.")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 522, width: 660, height: 28)
+        detail.frame = NSRect(x: 20, y: 614, width: 700, height: 28)
         content.addSubview(detail)
 
-        let execution = NSTextField(labelWithString: "ADMINISTRATOR EXECUTION")
+        let execution = NSTextField(labelWithString: "ADMINISTRATOR · PRIVATE CHAT AND ENABLED GROUPS")
         execution.font = .systemFont(ofSize: 10, weight: .semibold)
         execution.textColor = .secondaryLabelColor
-        execution.frame = NSRect(x: 20, y: 492, width: 240, height: 14)
+        execution.frame = NSRect(x: 20, y: 582, width: 390, height: 14)
         content.addSubview(execution)
         let sandbox = NSTextField(labelWithString: "Default sandbox · \(security.sandbox)")
         sandbox.font = .systemFont(ofSize: 11)
         sandbox.textColor = .secondaryLabelColor
-        sandbox.frame = NSRect(x: 420, y: 491, width: 260, height: 16)
+        sandbox.alignment = .right
+        sandbox.frame = NSRect(x: 430, y: 581, width: 290, height: 16)
         content.addSubview(sandbox)
 
         func toggle(_ title: String, checked: Bool, y: CGFloat) -> NSButton {
@@ -2589,64 +2597,83 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let network = NSButton(checkboxWithTitle: "Allow network access", target: nil, action: nil)
         network.state = security.networkAccess ? .on : .off
         network.font = .systemFont(ofSize: 12)
-        network.frame = NSRect(x: 20, y: 458, width: 500, height: 20)
+        network.frame = NSRect(x: 20, y: 550, width: 580, height: 20)
         content.addSubview(network)
-        let fullAccess = toggle("Allow administrator full filesystem access", checked: security.adminFullAccess, y: 430)
-        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, y: 402)
-        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, y: 374)
-        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, y: 346)
+        let fullAccess = toggle("Allow unrestricted filesystem access", checked: security.adminFullAccess, y: 524)
+        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, y: 498)
+        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, y: 472)
+        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, y: 446)
         securityNetworkAccess = network
         securityAdminFullAccess = fullAccess
         securityAdminAutoApprove = autoApprove
         securityAdminMcp = mcp
         securityAdminDelegatedWrite = delegatedWrite
 
-        let groups = NSTextField(labelWithString: "GROUP CHAT")
+        let groups = NSTextField(labelWithString: "NON-ADMIN GROUP MEMBERS · ENABLED GROUPS ONLY")
         groups.font = .systemFont(ofSize: 10, weight: .semibold)
         groups.textColor = .secondaryLabelColor
-        groups.frame = NSRect(x: 20, y: 312, width: 180, height: 14)
+        groups.frame = NSRect(x: 20, y: 410, width: 390, height: 14)
         content.addSubview(groups)
-        let groupNetwork = toggle("Allow non-admin group network research", checked: security.groupNetworkAccess, y: 278)
-        let groupWrite = toggle("Allow non-admin group sandbox file writes", checked: security.groupWorkspaceWrite, y: 250)
+        let groupRequests = toggle("Accept direct requests from non-admin members", checked: security.groupMemberRequestsEnabled, y: 378)
+        let groupNetwork = toggle("Allow ordinary network research", checked: security.groupNetworkAccess, y: 352)
+        let groupWrite = toggle("Allow files to be created or edited in the group sandbox", checked: security.groupWorkspaceWrite, y: 326)
+        securityGroupMemberRequests = groupRequests
         securityGroupNetwork = groupNetwork
         securityGroupWorkspaceWrite = groupWrite
-        let enabledGroups = security.groups.isEmpty
-            ? "No enabled groups."
-            : security.groups.prefix(3).map { "\($0.title) (\($0.chatID))" }.joined(separator: " · ")
-        let groupSummary = NSTextField(wrappingLabelWithString: "Enabled: \(enabledGroups)")
-        groupSummary.font = .systemFont(ofSize: 11)
-        groupSummary.textColor = .secondaryLabelColor
-        groupSummary.frame = NSRect(x: 20, y: 211, width: 660, height: 28)
-        content.addSubview(groupSummary)
 
-        let fixed = NSTextField(labelWithString: "FIXED BOUNDARIES")
+        let enabledGroupTitle = NSTextField(labelWithString: "ENABLED GROUPS (\(security.groups.count))")
+        enabledGroupTitle.font = .systemFont(ofSize: 10, weight: .semibold)
+        enabledGroupTitle.textColor = .secondaryLabelColor
+        enabledGroupTitle.frame = NSRect(x: 20, y: 294, width: 200, height: 14)
+        content.addSubview(enabledGroupTitle)
+        let groupList = NSScrollView(frame: NSRect(x: 20, y: 190, width: 700, height: 94))
+        groupList.borderType = .bezelBorder
+        groupList.hasVerticalScroller = true
+        groupList.autohidesScrollers = true
+        groupList.drawsBackground = false
+        let groupText = NSTextView(frame: NSRect(x: 0, y: 0, width: 680, height: 94))
+        groupText.isEditable = false
+        groupText.isSelectable = true
+        groupText.drawsBackground = false
+        groupText.font = .systemFont(ofSize: 11)
+        groupText.textColor = .secondaryLabelColor
+        groupText.textContainerInset = NSSize(width: 8, height: 7)
+        let groupRows = security.groups.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }.map {
+            "\($0.title)\n  Chat ID \($0.chatID) · enabled \(timeAgoText($0.enabledAt))"
+        }
+        groupText.string = groupRows.isEmpty ? "No groups are enabled. An administrator can enable a group with /enable_group." : groupRows.joined(separator: "\n\n")
+        groupText.frame.size.height = max(94, CGFloat(groupRows.count) * 44 + 14)
+        groupList.documentView = groupText
+        content.addSubview(groupList)
+
+        let fixed = NSTextField(labelWithString: "FIXED NON-ADMIN BOUNDARIES")
         fixed.font = .systemFont(ofSize: 10, weight: .semibold)
         fixed.textColor = .secondaryLabelColor
-        fixed.frame = NSRect(x: 20, y: 178, width: 180, height: 14)
+        fixed.frame = NSRect(x: 20, y: 158, width: 240, height: 14)
         content.addSubview(fixed)
-        let groupPolicy = NSTextField(wrappingLabelWithString: "\(security.telegram). Group requests must mention or reply to Codeshark. Non-admin group work remains isolated from administrator memory, credentials, project roots, and MCP.")
+        let groupPolicy = NSTextField(wrappingLabelWithString: "Direct mention or reply is always required. Members never access administrator memory, credentials, configured project roots, full filesystem access, or MCP connectors.")
         groupPolicy.font = .systemFont(ofSize: 11)
         groupPolicy.textColor = .secondaryLabelColor
-        groupPolicy.frame = NSRect(x: 20, y: 130, width: 660, height: 42)
+        groupPolicy.frame = NSRect(x: 20, y: 116, width: 700, height: 34)
         content.addSubview(groupPolicy)
 
-        let local = NSTextField(wrappingLabelWithString: "Local console: actions sent through Open Codeshark are direct owner requests on this Mac, with a separate session and the same configured sandbox.")
+        let local = NSTextField(wrappingLabelWithString: "Blocked for members: dependency or plugin installation, deployment or production control, destructive actions, and external state-changing actions.")
         local.font = .systemFont(ofSize: 11)
         local.textColor = .secondaryLabelColor
-        local.frame = NSRect(x: 20, y: 78, width: 660, height: 32)
+        local.frame = NSRect(x: 20, y: 76, width: 700, height: 28)
         content.addSubview(local)
 
-        let separator = NSBox(frame: NSRect(x: 20, y: 43, width: 660, height: 1))
+        let separator = NSBox(frame: NSRect(x: 20, y: 43, width: 700, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
-        let close = NSButton(title: "Close", target: self, action: #selector(closeSecurity))
-        close.bezelStyle = .rounded
-        close.frame = NSRect(x: 20, y: 9, width: 84, height: 26)
-        content.addSubview(close)
+        let back = NSButton(title: "Back", target: self, action: #selector(backFromSecurity))
+        back.bezelStyle = .rounded
+        back.frame = NSRect(x: 20, y: 9, width: 84, height: 26)
+        content.addSubview(back)
         let apply = NSButton(title: "Apply", target: self, action: #selector(applySecurity))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 596, y: 9, width: 84, height: 26)
+        apply.frame = NSRect(x: 636, y: 9, width: 84, height: 26)
         content.addSubview(apply)
         panel.contentView = content
         panel.center()
@@ -2655,8 +2682,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         securityPanel = panel
     }
 
-    @objc private func closeSecurity() {
+    @objc private func backFromSecurity() {
         securityPanel?.close()
+        showSettings()
     }
 
     @objc private func applySecurity() {
@@ -2665,13 +2693,14 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let autoApprove = securityAdminAutoApprove,
               let mcp = securityAdminMcp,
               let delegatedWrite = securityAdminDelegatedWrite,
+              let groupRequests = securityGroupMemberRequests,
               let groupNetwork = securityGroupNetwork,
               let groupWrite = securityGroupWorkspaceWrite
         else {
             showError("Could not read the security settings.")
             return
         }
-        securityPanel?.close()
+        backFromSecurity()
         runServiceCommand([
             "set-security",
             "--network", network.state == .on ? "true" : "false",
@@ -2679,6 +2708,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--admin-auto-approve-actions", autoApprove.state == .on ? "true" : "false",
             "--admin-mcp-enabled", mcp.state == .on ? "true" : "false",
             "--admin-delegated-write-access", delegatedWrite.state == .on ? "true" : "false",
+            "--group-member-requests-enabled", groupRequests.state == .on ? "true" : "false",
             "--group-network-access", groupNetwork.state == .on ? "true" : "false",
             "--group-workspace-write", groupWrite.state == .on ? "true" : "false",
         ])
@@ -2747,7 +2777,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         if !dashboard.snapshot.workspacePath.isEmpty {
             chooser.directoryURL = URL(fileURLWithPath: dashboard.snapshot.workspacePath)
         }
-        guard chooser.runModal() == .OK, let directory = chooser.url else { return }
+        guard chooser.runModal() == .OK, let directory = chooser.url else {
+            showSettings()
+            return
+        }
 
         let confirmation = NSAlert()
         confirmation.messageText = "Set Codeshark workspace?"
@@ -2755,9 +2788,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             + "\n\nThis changes Codeshark's working directory for new tasks. It saves now and restarts automatically after active work finishes."
         confirmation.addButton(withTitle: "Set Workspace")
         confirmation.addButton(withTitle: "Cancel")
-        guard confirmation.runModal() == .alertFirstButtonReturn else { return }
+        guard confirmation.runModal() == .alertFirstButtonReturn else {
+            showSettings()
+            return
+        }
 
         runServiceCommand(["set-workspace", directory.path])
+        showSettings()
     }
 
     private func configureModels() {
@@ -2854,10 +2891,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         separator.boxType = .separator
         content.addSubview(separator)
 
-        let close = NSButton(title: "Close", target: self, action: #selector(closeModelRouting))
-        close.bezelStyle = .rounded
-        close.frame = NSRect(x: 16, y: 10, width: 84, height: 26)
-        content.addSubview(close)
+        let back = NSButton(title: "Back", target: self, action: #selector(backFromModelRouting))
+        back.bezelStyle = .rounded
+        back.frame = NSRect(x: 16, y: 10, width: 84, height: 26)
+        content.addSubview(back)
 
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyModelRouting))
         apply.bezelStyle = .rounded
@@ -2924,8 +2961,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         configureReasoningPicker(effortPicker, model: model, current: effortPicker.titleOfSelectedItem)
     }
 
-    @objc private func closeModelRouting() {
-        modelRoutingPanel?.orderOut(nil)
+    @objc private func backFromModelRouting() {
+        modelRoutingPanel?.close()
+        showSettings()
     }
 
     @objc private func applyModelRouting() {
@@ -2957,7 +2995,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             showError("Could not read the selected model routing.")
             return
         }
-        modelRoutingPanel?.orderOut(nil)
+        backFromModelRouting()
         runServiceCommand([
             "set-models",
             "--routine", routine,
@@ -3071,10 +3109,10 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let separator = NSBox(frame: NSRect(x: 16, y: 42, width: 848, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
-        let close = NSButton(title: "Close", target: self, action: #selector(closeOrchestration))
-        close.bezelStyle = .rounded
-        close.frame = NSRect(x: 16, y: 9, width: 84, height: 26)
-        content.addSubview(close)
+        let back = NSButton(title: "Back", target: self, action: #selector(backFromOrchestration))
+        back.bezelStyle = .rounded
+        back.frame = NSRect(x: 16, y: 9, width: 84, height: 26)
+        content.addSubview(back)
         let apply = NSButton(title: "Apply", target: self, action: #selector(applyOrchestration))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
@@ -3123,8 +3161,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         return button
     }
 
-    @objc private func closeOrchestration() {
-        orchestrationPanel?.orderOut(nil)
+    @objc private func backFromOrchestration() {
+        orchestrationPanel?.close()
+        showSettings()
     }
 
     @objc private func applyOrchestration() {
@@ -3168,7 +3207,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
                 "--\(option)-finalization", finalization.state == .on ? "true" : "false",
             ]
         }
-        orchestrationPanel?.orderOut(nil)
+        backFromOrchestration()
         runServiceCommand(arguments)
     }
 
@@ -3397,6 +3436,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             securityAdminAutoApprove = nil
             securityAdminMcp = nil
             securityAdminDelegatedWrite = nil
+            securityGroupMemberRequests = nil
             securityGroupNetwork = nil
             securityGroupWorkspaceWrite = nil
         } else if window == localConsolePanel {

@@ -123,6 +123,7 @@ class Config:
     admin_auto_approve_actions: bool = False
     admin_mcp_enabled: bool = True
     admin_delegated_write_access: bool = True
+    group_member_requests_enabled: bool = True
     group_network_access: bool = True
     group_workspace_write: bool = True
     attachment_max_bytes: int = 10_000_000
@@ -355,6 +356,7 @@ def load_config(path: Path | None = None) -> Config:
     )
     admin_mcp_enabled = _require_bool(data, "admin_mcp_enabled", True)
     admin_delegated_write_access = _require_bool(data, "admin_delegated_write_access", True)
+    group_member_requests_enabled = _require_bool(data, "group_member_requests_enabled", True)
     group_network_access = _require_bool(data, "group_network_access", True)
     group_workspace_write = _require_bool(data, "group_workspace_write", True)
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
@@ -523,6 +525,7 @@ def load_config(path: Path | None = None) -> Config:
         admin_auto_approve_actions=admin_auto_approve_actions,
         admin_mcp_enabled=admin_mcp_enabled,
         admin_delegated_write_access=admin_delegated_write_access,
+        group_member_requests_enabled=group_member_requests_enabled,
         group_network_access=group_network_access,
         group_workspace_write=group_workspace_write,
         attachment_max_bytes=attachment_max_bytes,
@@ -659,6 +662,7 @@ def set_security_settings(
     admin_auto_approve_actions: bool,
     admin_mcp_enabled: bool,
     admin_delegated_write_access: bool,
+    group_member_requests_enabled: bool,
     group_network_access: bool,
     group_workspace_write: bool,
     config_path: Path | None = None,
@@ -670,6 +674,7 @@ def set_security_settings(
         admin_auto_approve_actions,
         admin_mcp_enabled,
         admin_delegated_write_access,
+        group_member_requests_enabled,
         group_network_access,
         group_workspace_write,
     )
@@ -687,6 +692,7 @@ def set_security_settings(
         "admin_auto_approve_actions": admin_auto_approve_actions,
         "admin_mcp_enabled": admin_mcp_enabled,
         "admin_delegated_write_access": admin_delegated_write_access,
+        "group_member_requests_enabled": group_member_requests_enabled,
         "group_network_access": group_network_access,
         "group_workspace_write": group_workspace_write,
     }
@@ -1187,6 +1193,7 @@ def write_local_config(
             "admin_auto_approve_actions = false",
             "admin_mcp_enabled = true",
             "admin_delegated_write_access = true",
+            "group_member_requests_enabled = true",
             "group_network_access = true",
             "group_workspace_write = true",
             "attachment_max_bytes = 10000000",
