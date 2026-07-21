@@ -23,6 +23,7 @@ class RunResult:
     cancelled: bool = False
     timed_out: bool = False
     token_usage: "TokenUsage | None" = None
+    tool_usage: "ToolUsage | None" = None
     # A startup failure is safe to retry because Codex never accepted a turn.
     turn_started: bool = False
     startup_retried: bool = False
@@ -38,6 +39,30 @@ class TokenUsage:
     output_tokens: int
     reasoning_output_tokens: int
     total_tokens: int
+
+
+@dataclass(frozen=True)
+class ToolUsage:
+    """Completed tool items emitted by Codex for one turn.
+
+    Codex exposes the item type but not a matching API billing line item, so these
+    counts are intentionally telemetry only rather than a guessed dollar amount.
+    """
+
+    command_execution_calls: int = 0
+    file_change_calls: int = 0
+    mcp_tool_calls: int = 0
+    web_search_calls: int = 0
+    image_generation_calls: int = 0
+
+
+_TOOL_USAGE_FIELD_BY_ITEM_TYPE = {
+    "commandExecution": "command_execution_calls",
+    "fileChange": "file_change_calls",
+    "mcpToolCall": "mcp_tool_calls",
+    "webSearch": "web_search_calls",
+    "imageGeneration": "image_generation_calls",
+}
 
 
 @dataclass(frozen=True)
@@ -83,6 +108,16 @@ def parse_token_usage(value: object) -> TokenUsage | None:
         reasoning_output_tokens=value["reasoningOutputTokens"],
         total_tokens=value["totalTokens"],
     )
+
+
+def parse_tool_usage_item(value: object) -> str | None:
+    """Return a stored telemetry field for a completed Codex tool item."""
+    if not isinstance(value, dict):
+        return None
+    item_type = value.get("type")
+    if not isinstance(item_type, str):
+        return None
+    return _TOOL_USAGE_FIELD_BY_ITEM_TYPE.get(item_type)
 
 
 def _parse_rate_limit_window(value: object) -> RateLimitWindow | None:
@@ -704,6 +739,7 @@ class CodexRunner:
         messages: list[str] = []
         streamed_message = ""
         token_usage: TokenUsage | None = None
+        tool_usage_counts = {field: 0 for field in _TOOL_USAGE_FIELD_BY_ITEM_TYPE.values()}
         timed_out = False
         exit_code = 1
         error_message = ""
@@ -801,6 +837,9 @@ class CodexRunner:
                         self._flush_pending_steers(process)
                 elif method == "item/completed" and isinstance(params, dict):
                     item = params.get("item")
+                    tool_usage_field = parse_tool_usage_item(item)
+                    if tool_usage_field is not None:
+                        tool_usage_counts[tool_usage_field] += 1
                     if isinstance(item, dict) and item.get("type") in {
                         "agentMessage",
                         "agent_message",
@@ -853,6 +892,7 @@ class CodexRunner:
             cancelled=cancelled,
             timed_out=timed_out,
             token_usage=token_usage,
+            tool_usage=ToolUsage(**tool_usage_counts) if any(tool_usage_counts.values()) else None,
             turn_started=turn_started,
         )
 

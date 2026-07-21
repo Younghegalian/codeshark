@@ -154,6 +154,51 @@ class AgentStoreTests(unittest.TestCase):
             self.assertEqual(usage[0].cached_input_tokens, 30)
             self.assertEqual(usage[0].reasoning_output_tokens, 15)
 
+    def test_tracks_long_context_and_observed_tool_items(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            store.record_model_run(
+                task_id="task-1",
+                phase="primary",
+                role="Primary",
+                model="gpt-5.6-sol",
+                reasoning_effort="high",
+                started_at=100.0,
+                finished_at=160.0,
+                exit_code=0,
+                cancelled=False,
+                timed_out=False,
+                input_tokens=300_000,
+                cached_input_tokens=250_000,
+                cache_write_input_tokens=10_000,
+                output_tokens=8_000,
+                reasoning_output_tokens=6_000,
+                total_tokens=308_000,
+                web_search_calls=2,
+                mcp_tool_calls=3,
+                command_execution_calls=5,
+                file_change_calls=1,
+                image_generation_calls=1,
+                token_usage_recorded=True,
+            )
+
+            summary = store.model_run_summaries(since=150.0)[0]
+
+            self.assertEqual(summary.long_context_runs, 1)
+            self.assertEqual(summary.long_context_input_tokens, 300_000)
+            self.assertEqual(summary.long_context_cached_input_tokens, 250_000)
+            self.assertEqual(summary.long_context_cache_write_input_tokens, 10_000)
+            self.assertEqual(summary.long_context_output_tokens, 8_000)
+            self.assertEqual(summary.web_search_calls, 2)
+            self.assertEqual(summary.mcp_tool_calls, 3)
+            self.assertEqual(summary.command_execution_calls, 5)
+            self.assertEqual(summary.file_change_calls, 1)
+            self.assertEqual(summary.image_generation_calls, 1)
+
+            project = store.project_model_usage(since=150.0)[0]
+            self.assertEqual(project.long_context_runs, 1)
+            self.assertEqual(project.web_search_calls, 2)
+
     def test_persists_and_recovers_running_task(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "agent.db"

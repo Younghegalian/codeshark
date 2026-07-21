@@ -214,6 +214,12 @@ finalizer_model = "gpt-5.6-sol"
 finalizer_reasoning_effort = "medium"
 ```
 
+### Model usage estimates
+
+The menu-bar **Model Usage** panel uses the exact per-turn token breakdown emitted by Codex for Codeshark work. Its API text estimate uses the selected model's public standard-tier rates, including cache reads, GPT-5.6 cache writes, and the documented long-context premium for supported 1.05M-context models. Reasoning tokens are a subset of output tokens and are not charged twice.
+
+Completed shell, file-change, MCP, web-search, and image-generation items are recorded separately for new turns. Codeshark does not invent a dollar amount when Codex does not emit an applicable billing line: tool-specific fees, regional-processing uplifts, external MCP/vendor charges, and ChatGPT/Codex plan quota debits remain explicitly unpriced. The estimate is therefore useful for comparing Codeshark's API-equivalent text work, not as an invoice or a measure of plan-limit consumption.
+
 Keep read-only inspection roots separate:
 
 ```toml

@@ -9,7 +9,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from codex_codeshark.codex_runner import CodexRunner, RunResult, parse_codex_events, parse_token_usage
+from codex_codeshark.codex_runner import (
+    CodexRunner,
+    RunResult,
+    parse_codex_events,
+    parse_token_usage,
+    parse_tool_usage_item,
+)
 
 
 class CodexRunnerTests(unittest.TestCase):
@@ -470,6 +476,17 @@ class CodexRunnerTests(unittest.TestCase):
 
     def test_rejects_incomplete_token_usage_breakdown(self) -> None:
         self.assertIsNone(parse_token_usage({"inputTokens": 100}))
+
+    def test_recognizes_completed_tool_item_types(self) -> None:
+        self.assertEqual(
+            parse_tool_usage_item({"type": "webSearch"}),
+            "web_search_calls",
+        )
+        self.assertEqual(
+            parse_tool_usage_item({"type": "mcpToolCall"}),
+            "mcp_tool_calls",
+        )
+        self.assertIsNone(parse_tool_usage_item({"type": "agentMessage"}))
 
 
 if __name__ == "__main__":

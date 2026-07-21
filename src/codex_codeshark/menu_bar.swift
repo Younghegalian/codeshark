@@ -324,6 +324,16 @@ struct DashboardModelUsage: Decodable, Identifiable {
     let outputTokens: Int?
     let reasoningOutputTokens: Int?
     let totalTokens: Int?
+    let longContextRuns: Int?
+    let longContextInputTokens: Int?
+    let longContextCachedInputTokens: Int?
+    let longContextCacheWriteInputTokens: Int?
+    let longContextOutputTokens: Int?
+    let commandExecutionCalls: Int?
+    let fileChangeCalls: Int?
+    let mcpToolCalls: Int?
+    let webSearchCalls: Int?
+    let imageGenerationCalls: Int?
 
     var id: String { "\(model)-\(reasoningEffort)-\(phase)" }
 
@@ -338,6 +348,16 @@ struct DashboardModelUsage: Decodable, Identifiable {
         case outputTokens = "output_tokens"
         case reasoningOutputTokens = "reasoning_output_tokens"
         case totalTokens = "total_tokens"
+        case longContextRuns = "long_context_runs"
+        case longContextInputTokens = "long_context_input_tokens"
+        case longContextCachedInputTokens = "long_context_cached_input_tokens"
+        case longContextCacheWriteInputTokens = "long_context_cache_write_input_tokens"
+        case longContextOutputTokens = "long_context_output_tokens"
+        case commandExecutionCalls = "command_execution_calls"
+        case fileChangeCalls = "file_change_calls"
+        case mcpToolCalls = "mcp_tool_calls"
+        case webSearchCalls = "web_search_calls"
+        case imageGenerationCalls = "image_generation_calls"
     }
 }
 
@@ -353,6 +373,16 @@ struct DashboardProjectUsage: Decodable, Identifiable {
     let outputTokens: Int?
     let reasoningOutputTokens: Int?
     let totalTokens: Int?
+    let longContextRuns: Int?
+    let longContextInputTokens: Int?
+    let longContextCachedInputTokens: Int?
+    let longContextCacheWriteInputTokens: Int?
+    let longContextOutputTokens: Int?
+    let commandExecutionCalls: Int?
+    let fileChangeCalls: Int?
+    let mcpToolCalls: Int?
+    let webSearchCalls: Int?
+    let imageGenerationCalls: Int?
 
     var id: String { "\(project)-\(model)-\(reasoningEffort)" }
 
@@ -366,6 +396,16 @@ struct DashboardProjectUsage: Decodable, Identifiable {
         case outputTokens = "output_tokens"
         case reasoningOutputTokens = "reasoning_output_tokens"
         case totalTokens = "total_tokens"
+        case longContextRuns = "long_context_runs"
+        case longContextInputTokens = "long_context_input_tokens"
+        case longContextCachedInputTokens = "long_context_cached_input_tokens"
+        case longContextCacheWriteInputTokens = "long_context_cache_write_input_tokens"
+        case longContextOutputTokens = "long_context_output_tokens"
+        case commandExecutionCalls = "command_execution_calls"
+        case fileChangeCalls = "file_change_calls"
+        case mcpToolCalls = "mcp_tool_calls"
+        case webSearchCalls = "web_search_calls"
+        case imageGenerationCalls = "image_generation_calls"
     }
 }
 
@@ -1613,6 +1653,16 @@ private struct ModelUsageGroup: Identifiable {
     let outputTokens: Int
     let reasoningOutputTokens: Int
     let totalTokens: Int
+    let longContextRuns: Int
+    let longContextInputTokens: Int
+    let longContextCachedInputTokens: Int
+    let longContextCacheWriteInputTokens: Int
+    let longContextOutputTokens: Int
+    let commandExecutionCalls: Int
+    let fileChangeCalls: Int
+    let mcpToolCalls: Int
+    let webSearchCalls: Int
+    let imageGenerationCalls: Int
 
     var id: String { "\(model)-\(reasoningEffort)" }
 }
@@ -1622,27 +1672,28 @@ private struct APIModelPrice {
     let cachedInput: Double
     let cacheWriteInput: Double?
     let output: Double
+    let hasLongContextPremium: Bool
 }
 
 private func apiModelPrice(for model: String) -> APIModelPrice? {
     // Official OpenAI standard API list prices per 1M tokens. GPT-5.6 cache writes cost 1.25× input.
     switch model {
     case "gpt-5.6-sol":
-        return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: 6.25, output: 30.00)
+        return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: 6.25, output: 30.00, hasLongContextPremium: true)
     case "gpt-5.6-terra":
-        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: 3.125, output: 15.00)
+        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: 3.125, output: 15.00, hasLongContextPremium: true)
     case "gpt-5.6-luna":
-        return APIModelPrice(input: 1.00, cachedInput: 0.10, cacheWriteInput: 1.25, output: 6.00)
+        return APIModelPrice(input: 1.00, cachedInput: 0.10, cacheWriteInput: 1.25, output: 6.00, hasLongContextPremium: true)
     case "gpt-5.5":
-        return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: nil, output: 30.00)
+        return APIModelPrice(input: 5.00, cachedInput: 0.50, cacheWriteInput: nil, output: 30.00, hasLongContextPremium: true)
     case "gpt-5.4":
-        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: nil, output: 15.00)
+        return APIModelPrice(input: 2.50, cachedInput: 0.25, cacheWriteInput: nil, output: 15.00, hasLongContextPremium: true)
     case "gpt-5.4-mini":
-        return APIModelPrice(input: 0.75, cachedInput: 0.075, cacheWriteInput: nil, output: 4.50)
+        return APIModelPrice(input: 0.75, cachedInput: 0.075, cacheWriteInput: nil, output: 4.50, hasLongContextPremium: false)
     case "gpt-5.4-nano":
-        return APIModelPrice(input: 0.20, cachedInput: 0.02, cacheWriteInput: nil, output: 1.25)
+        return APIModelPrice(input: 0.20, cachedInput: 0.02, cacheWriteInput: nil, output: 1.25, hasLongContextPremium: false)
     case "gpt-5.3-codex", "gpt-5.2":
-        return APIModelPrice(input: 1.75, cachedInput: 0.175, cacheWriteInput: nil, output: 14.00)
+        return APIModelPrice(input: 1.75, cachedInput: 0.175, cacheWriteInput: nil, output: 14.00, hasLongContextPremium: false)
     default:
         return nil
     }
@@ -1654,18 +1705,36 @@ private func apiEquivalentCost(
     cachedInputTokens: Int,
     cacheWriteInputTokens: Int,
     outputTokens: Int,
-    reasoningOutputTokens: Int
+    longContextInputTokens: Int,
+    longContextCachedInputTokens: Int,
+    longContextCacheWriteInputTokens: Int,
+    longContextOutputTokens: Int
 ) -> Double? {
     guard let price = apiModelPrice(for: model) else { return nil }
     let cached = min(inputTokens, cachedInputTokens)
     let cacheWrites = min(max(0, inputTokens - cached), cacheWriteInputTokens)
     guard cacheWrites == 0 || price.cacheWriteInput != nil else { return nil }
     let uncached = max(0, inputTokens - cached - cacheWrites)
-    let output = outputTokens + reasoningOutputTokens
-    return Double(uncached) * price.input / 1_000_000
+    var cost = Double(uncached) * price.input / 1_000_000
         + Double(cached) * price.cachedInput / 1_000_000
         + Double(cacheWrites) * (price.cacheWriteInput ?? 0) / 1_000_000
-        + Double(output) * price.output / 1_000_000
+        + Double(outputTokens) * price.output / 1_000_000
+    guard price.hasLongContextPremium else { return cost }
+
+    let longInput = min(max(0, inputTokens), max(0, longContextInputTokens))
+    let longCached = min(longInput, max(0, longContextCachedInputTokens))
+    let longCacheWrites = min(
+        max(0, longInput - longCached),
+        max(0, longContextCacheWriteInputTokens)
+    )
+    guard longCacheWrites == 0 || price.cacheWriteInput != nil else { return nil }
+    let longUncached = max(0, longInput - longCached - longCacheWrites)
+    let longOutput = min(max(0, outputTokens), max(0, longContextOutputTokens))
+    cost += Double(longUncached) * price.input / 1_000_000
+        + Double(longCached) * price.cachedInput / 1_000_000
+        + Double(longCacheWrites) * (price.cacheWriteInput ?? 0) / 1_000_000
+        + Double(longOutput) * price.output * 0.5 / 1_000_000
+    return cost
 }
 
 private func apiCostText(_ amount: Double) -> String {
@@ -1688,7 +1757,10 @@ private struct ProjectUsageGroup: Identifiable {
                 cachedInputTokens: $0.cachedInputTokens ?? 0,
                 cacheWriteInputTokens: $0.cacheWriteInputTokens ?? 0,
                 outputTokens: $0.outputTokens ?? 0,
-                reasoningOutputTokens: $0.reasoningOutputTokens ?? 0
+                longContextInputTokens: $0.longContextInputTokens ?? 0,
+                longContextCachedInputTokens: $0.longContextCachedInputTokens ?? 0,
+                longContextCacheWriteInputTokens: $0.longContextCacheWriteInputTokens ?? 0,
+                longContextOutputTokens: $0.longContextOutputTokens ?? 0
             )
         }
         return costs.isEmpty ? nil : costs.reduce(0, +)
@@ -1748,7 +1820,17 @@ struct ModelUsageView: View {
                 cacheWriteInputTokens: entries.reduce(0) { $0 + ($1.cacheWriteInputTokens ?? 0) },
                 outputTokens: entries.reduce(0) { $0 + ($1.outputTokens ?? 0) },
                 reasoningOutputTokens: entries.reduce(0) { $0 + ($1.reasoningOutputTokens ?? 0) },
-                totalTokens: entries.reduce(0) { $0 + ($1.totalTokens ?? 0) }
+                totalTokens: entries.reduce(0) { $0 + ($1.totalTokens ?? 0) },
+                longContextRuns: entries.reduce(0) { $0 + ($1.longContextRuns ?? 0) },
+                longContextInputTokens: entries.reduce(0) { $0 + ($1.longContextInputTokens ?? 0) },
+                longContextCachedInputTokens: entries.reduce(0) { $0 + ($1.longContextCachedInputTokens ?? 0) },
+                longContextCacheWriteInputTokens: entries.reduce(0) { $0 + ($1.longContextCacheWriteInputTokens ?? 0) },
+                longContextOutputTokens: entries.reduce(0) { $0 + ($1.longContextOutputTokens ?? 0) },
+                commandExecutionCalls: entries.reduce(0) { $0 + ($1.commandExecutionCalls ?? 0) },
+                fileChangeCalls: entries.reduce(0) { $0 + ($1.fileChangeCalls ?? 0) },
+                mcpToolCalls: entries.reduce(0) { $0 + ($1.mcpToolCalls ?? 0) },
+                webSearchCalls: entries.reduce(0) { $0 + ($1.webSearchCalls ?? 0) },
+                imageGenerationCalls: entries.reduce(0) { $0 + ($1.imageGenerationCalls ?? 0) }
             )
         }
         .sorted {
@@ -1770,7 +1852,10 @@ struct ModelUsageView: View {
                 cachedInputTokens: group.cachedInputTokens,
                 cacheWriteInputTokens: group.cacheWriteInputTokens,
                 outputTokens: group.outputTokens,
-                reasoningOutputTokens: group.reasoningOutputTokens
+                longContextInputTokens: group.longContextInputTokens,
+                longContextCachedInputTokens: group.longContextCachedInputTokens,
+                longContextCacheWriteInputTokens: group.longContextCacheWriteInputTokens,
+                longContextOutputTokens: group.longContextOutputTokens
             ) ?? 0)
         }
     }
@@ -1800,6 +1885,44 @@ struct ModelUsageView: View {
     private var unpricedModels: [String] {
         let source = breakdown == 0 ? entries.map(\.model) : projectEntries.map(\.model)
         return Array(Set(source.filter { apiModelPrice(for: $0) == nil })).sorted()
+    }
+
+    private var longContextRuns: Int {
+        if breakdown == 0 {
+            return groups.reduce(0) { total, group in
+                total + ((apiModelPrice(for: group.model)?.hasLongContextPremium ?? false)
+                    ? group.longContextRuns : 0)
+            }
+        }
+        return projectEntries.reduce(0) { total, entry in
+            total + ((apiModelPrice(for: entry.model)?.hasLongContextPremium ?? false)
+                ? (entry.longContextRuns ?? 0) : 0)
+        }
+    }
+
+    private var observedToolItems: [(label: String, count: Int)] {
+        let entries = breakdown == 0
+            ? (
+                command: groups.reduce(0) { $0 + $1.commandExecutionCalls },
+                changes: groups.reduce(0) { $0 + $1.fileChangeCalls },
+                mcp: groups.reduce(0) { $0 + $1.mcpToolCalls },
+                search: groups.reduce(0) { $0 + $1.webSearchCalls },
+                image: groups.reduce(0) { $0 + $1.imageGenerationCalls }
+            )
+            : (
+                command: projectEntries.reduce(0) { $0 + ($1.commandExecutionCalls ?? 0) },
+                changes: projectEntries.reduce(0) { $0 + ($1.fileChangeCalls ?? 0) },
+                mcp: projectEntries.reduce(0) { $0 + ($1.mcpToolCalls ?? 0) },
+                search: projectEntries.reduce(0) { $0 + ($1.webSearchCalls ?? 0) },
+                image: projectEntries.reduce(0) { $0 + ($1.imageGenerationCalls ?? 0) }
+            )
+        return [
+            ("web search", entries.search),
+            ("image", entries.image),
+            ("MCP", entries.mcp),
+            ("shell", entries.command),
+            ("file change", entries.changes),
+        ].filter { $0.count > 0 }
     }
 
     private var visibleQuotaBuckets: [DashboardUsageBucket] {
@@ -1876,7 +1999,7 @@ struct ModelUsageView: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("API-EQUIVALENT")
+                    Text("API TEXT ESTIMATE")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(apiCostText(displayedAPICost))
@@ -1887,9 +2010,18 @@ struct ModelUsageView: View {
             .padding(.vertical, 8)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
 
-            Text("Recorded cache and reasoning output are included in the API-equivalent estimate.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Standard-tier text pricing includes cache reads/writes and documented long-context premiums.")
+                Text("Reasoning is already part of output tokens, so it is not counted twice.\(longContextRuns > 0 ? " (longContextRuns) long-context turn(s) applied." : "")")
+                if observedToolItems.isEmpty {
+                    Text("Tool-specific fees, regional processing, and ChatGPT/Codex plan quota are not priced.")
+                } else {
+                    let tools = observedToolItems.map { "\($0.label) \($0.count)" }.joined(separator: " · ")
+                    Text("Observed tools: \(tools). Tool-specific fees, regional processing, and plan quota are not priced.")
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
 
             if !unpricedModels.isEmpty {
                 Text("No public standard API rate: \(unpricedModels.joined(separator: ", ")).")
@@ -1988,7 +2120,7 @@ struct ModelUsageView: View {
         }
         .padding(16)
         .frame(minWidth: 560, idealWidth: 580, maxWidth: .infinity,
-               minHeight: 712, idealHeight: 732, maxHeight: .infinity,
+               minHeight: 748, idealHeight: 768, maxHeight: .infinity,
                alignment: .top)
     }
 }
@@ -2929,13 +3061,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             return
         }
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 580, height: 732),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 768),
             styleMask: [.titled, .closable, .utilityWindow, .resizable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Codeshark Model Usage"
-        panel.minSize = NSSize(width: 560, height: 712)
+        panel.minSize = NSSize(width: 560, height: 748)
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.delegate = self

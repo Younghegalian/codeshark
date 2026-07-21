@@ -738,6 +738,16 @@ class AgentApp:
                                 "output_tokens": summary.output_tokens,
                                 "reasoning_output_tokens": summary.reasoning_output_tokens,
                                 "total_tokens": summary.total_tokens,
+                                "long_context_runs": summary.long_context_runs,
+                                "long_context_input_tokens": summary.long_context_input_tokens,
+                                "long_context_cached_input_tokens": summary.long_context_cached_input_tokens,
+                                "long_context_cache_write_input_tokens": summary.long_context_cache_write_input_tokens,
+                                "long_context_output_tokens": summary.long_context_output_tokens,
+                                "command_execution_calls": summary.command_execution_calls,
+                                "file_change_calls": summary.file_change_calls,
+                                "mcp_tool_calls": summary.mcp_tool_calls,
+                                "web_search_calls": summary.web_search_calls,
+                                "image_generation_calls": summary.image_generation_calls,
                             }
                             for summary in model_usage
                         ],
@@ -756,6 +766,16 @@ class AgentApp:
                                 "output_tokens": summary.output_tokens,
                                 "reasoning_output_tokens": summary.reasoning_output_tokens,
                                 "total_tokens": summary.total_tokens,
+                                "long_context_runs": summary.long_context_runs,
+                                "long_context_input_tokens": summary.long_context_input_tokens,
+                                "long_context_cached_input_tokens": summary.long_context_cached_input_tokens,
+                                "long_context_cache_write_input_tokens": summary.long_context_cache_write_input_tokens,
+                                "long_context_output_tokens": summary.long_context_output_tokens,
+                                "command_execution_calls": summary.command_execution_calls,
+                                "file_change_calls": summary.file_change_calls,
+                                "mcp_tool_calls": summary.mcp_tool_calls,
+                                "web_search_calls": summary.web_search_calls,
+                                "image_generation_calls": summary.image_generation_calls,
                             }
                             for summary in weekly_model_usage
                         ],
@@ -772,6 +792,16 @@ class AgentApp:
                                 "output_tokens": summary.output_tokens,
                                 "reasoning_output_tokens": summary.reasoning_output_tokens,
                                 "total_tokens": summary.total_tokens,
+                                "long_context_runs": summary.long_context_runs,
+                                "long_context_input_tokens": summary.long_context_input_tokens,
+                                "long_context_cached_input_tokens": summary.long_context_cached_input_tokens,
+                                "long_context_cache_write_input_tokens": summary.long_context_cache_write_input_tokens,
+                                "long_context_output_tokens": summary.long_context_output_tokens,
+                                "command_execution_calls": summary.command_execution_calls,
+                                "file_change_calls": summary.file_change_calls,
+                                "mcp_tool_calls": summary.mcp_tool_calls,
+                                "web_search_calls": summary.web_search_calls,
+                                "image_generation_calls": summary.image_generation_calls,
                             }
                             for summary in project_usage
                         ],
@@ -788,6 +818,16 @@ class AgentApp:
                                 "output_tokens": summary.output_tokens,
                                 "reasoning_output_tokens": summary.reasoning_output_tokens,
                                 "total_tokens": summary.total_tokens,
+                                "long_context_runs": summary.long_context_runs,
+                                "long_context_input_tokens": summary.long_context_input_tokens,
+                                "long_context_cached_input_tokens": summary.long_context_cached_input_tokens,
+                                "long_context_cache_write_input_tokens": summary.long_context_cache_write_input_tokens,
+                                "long_context_output_tokens": summary.long_context_output_tokens,
+                                "command_execution_calls": summary.command_execution_calls,
+                                "file_change_calls": summary.file_change_calls,
+                                "mcp_tool_calls": summary.mcp_tool_calls,
+                                "web_search_calls": summary.web_search_calls,
+                                "image_generation_calls": summary.image_generation_calls,
                             }
                             for summary in weekly_project_usage
                         ],
@@ -3001,6 +3041,15 @@ class AgentApp:
                 result.token_usage.reasoning_output_tokens if result.token_usage else 0
             ),
             total_tokens=result.token_usage.total_tokens if result.token_usage else 0,
+            command_execution_calls=(
+                result.tool_usage.command_execution_calls if result.tool_usage else 0
+            ),
+            file_change_calls=result.tool_usage.file_change_calls if result.tool_usage else 0,
+            mcp_tool_calls=result.tool_usage.mcp_tool_calls if result.tool_usage else 0,
+            web_search_calls=result.tool_usage.web_search_calls if result.tool_usage else 0,
+            image_generation_calls=(
+                result.tool_usage.image_generation_calls if result.tool_usage else 0
+            ),
             token_usage_recorded=result.token_usage is not None,
         )
         if result.token_usage is not None:

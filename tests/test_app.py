@@ -767,6 +767,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
         self.assertEqual(payload["last_failure"]["message"], "brief diagnostic")
         self.assertEqual(payload["model_usage_5h"][0]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_usage_5h"][0]["long_context_runs"], 0)
+        self.assertEqual(payload["model_usage_5h"][0]["web_search_calls"], 0)
         self.assertEqual(payload["model_usage_7d"][0]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["project_usage_5h"][0]["project"], "Private Project")
         self.assertEqual(payload["project_usage_5h"][0]["model"], "gpt-5.6-sol")

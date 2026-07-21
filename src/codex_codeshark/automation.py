@@ -106,6 +106,16 @@ class ModelRunSummary:
     output_tokens: int
     reasoning_output_tokens: int
     total_tokens: int
+    long_context_runs: int
+    long_context_input_tokens: int
+    long_context_cached_input_tokens: int
+    long_context_cache_write_input_tokens: int
+    long_context_output_tokens: int
+    command_execution_calls: int
+    file_change_calls: int
+    mcp_tool_calls: int
+    web_search_calls: int
+    image_generation_calls: int
 
 
 @dataclass(frozen=True)
@@ -121,6 +131,16 @@ class ProjectModelUsage:
     output_tokens: int
     reasoning_output_tokens: int
     total_tokens: int
+    long_context_runs: int
+    long_context_input_tokens: int
+    long_context_cached_input_tokens: int
+    long_context_cache_write_input_tokens: int
+    long_context_output_tokens: int
+    command_execution_calls: int
+    file_change_calls: int
+    mcp_tool_calls: int
+    web_search_calls: int
+    image_generation_calls: int
 
 
 @dataclass(frozen=True)
@@ -464,7 +484,12 @@ class AgentStore:
                     cache_write_input_tokens INTEGER NOT NULL DEFAULT 0,
                     output_tokens INTEGER NOT NULL DEFAULT 0,
                     reasoning_output_tokens INTEGER NOT NULL DEFAULT 0,
-                    total_tokens INTEGER NOT NULL DEFAULT 0
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    command_execution_calls INTEGER NOT NULL DEFAULT 0,
+                    file_change_calls INTEGER NOT NULL DEFAULT 0,
+                    mcp_tool_calls INTEGER NOT NULL DEFAULT 0,
+                    web_search_calls INTEGER NOT NULL DEFAULT 0,
+                    image_generation_calls INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS model_runs_recent
                     ON model_runs(finished_at DESC);
@@ -536,6 +561,11 @@ class AgentStore:
                 "output_tokens",
                 "reasoning_output_tokens",
                 "total_tokens",
+                "command_execution_calls",
+                "file_change_calls",
+                "mcp_tool_calls",
+                "web_search_calls",
+                "image_generation_calls",
             ):
                 if name not in model_run_columns:
                     if name == "role":
@@ -840,6 +870,11 @@ class AgentStore:
         output_tokens: int = 0,
         reasoning_output_tokens: int = 0,
         total_tokens: int = 0,
+        command_execution_calls: int = 0,
+        file_change_calls: int = 0,
+        mcp_tool_calls: int = 0,
+        web_search_calls: int = 0,
+        image_generation_calls: int = 0,
         token_usage_recorded: bool = False,
     ) -> None:
         with self._lock, self._connect() as connection:
@@ -849,8 +884,9 @@ class AgentStore:
                     (task_id, phase, role, model, reasoning_effort, started_at, finished_at,
                      elapsed_seconds, exit_code, cancelled, timed_out, token_usage_recorded,
                      input_tokens, cached_input_tokens, cache_write_input_tokens, output_tokens,
-                     reasoning_output_tokens, total_tokens)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     reasoning_output_tokens, total_tokens, command_execution_calls,
+                     file_change_calls, mcp_tool_calls, web_search_calls, image_generation_calls)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -871,6 +907,11 @@ class AgentStore:
                     max(0, output_tokens),
                     max(0, reasoning_output_tokens),
                     max(0, total_tokens),
+                    max(0, command_execution_calls),
+                    max(0, file_change_calls),
+                    max(0, mcp_tool_calls),
+                    max(0, web_search_calls),
+                    max(0, image_generation_calls),
                 ),
             )
 
@@ -919,7 +960,17 @@ class AgentStore:
                        SUM(cache_write_input_tokens) AS cache_write_input_tokens,
                        SUM(output_tokens) AS output_tokens,
                        SUM(reasoning_output_tokens) AS reasoning_output_tokens,
-                       SUM(total_tokens) AS total_tokens
+                       SUM(total_tokens) AS total_tokens,
+                       SUM(CASE WHEN input_tokens > 272000 THEN 1 ELSE 0 END) AS long_context_runs,
+                       SUM(CASE WHEN input_tokens > 272000 THEN input_tokens ELSE 0 END) AS long_context_input_tokens,
+                       SUM(CASE WHEN input_tokens > 272000 THEN cached_input_tokens ELSE 0 END) AS long_context_cached_input_tokens,
+                       SUM(CASE WHEN input_tokens > 272000 THEN cache_write_input_tokens ELSE 0 END) AS long_context_cache_write_input_tokens,
+                       SUM(CASE WHEN input_tokens > 272000 THEN output_tokens ELSE 0 END) AS long_context_output_tokens,
+                       SUM(command_execution_calls) AS command_execution_calls,
+                       SUM(file_change_calls) AS file_change_calls,
+                       SUM(mcp_tool_calls) AS mcp_tool_calls,
+                       SUM(web_search_calls) AS web_search_calls,
+                       SUM(image_generation_calls) AS image_generation_calls
                 FROM model_runs
                 {filters}
                 GROUP BY model, reasoning_effort, phase
@@ -942,6 +993,16 @@ class AgentStore:
                 output_tokens=row["output_tokens"],
                 reasoning_output_tokens=row["reasoning_output_tokens"],
                 total_tokens=row["total_tokens"],
+                long_context_runs=row["long_context_runs"],
+                long_context_input_tokens=row["long_context_input_tokens"],
+                long_context_cached_input_tokens=row["long_context_cached_input_tokens"],
+                long_context_cache_write_input_tokens=row["long_context_cache_write_input_tokens"],
+                long_context_output_tokens=row["long_context_output_tokens"],
+                command_execution_calls=row["command_execution_calls"],
+                file_change_calls=row["file_change_calls"],
+                mcp_tool_calls=row["mcp_tool_calls"],
+                web_search_calls=row["web_search_calls"],
+                image_generation_calls=row["image_generation_calls"],
             )
             for row in rows
         ]
@@ -958,7 +1019,17 @@ class AgentStore:
                        SUM(runs.cache_write_input_tokens) AS cache_write_input_tokens,
                        SUM(runs.output_tokens) AS output_tokens,
                        SUM(runs.reasoning_output_tokens) AS reasoning_output_tokens,
-                       SUM(runs.total_tokens) AS total_tokens
+                       SUM(runs.total_tokens) AS total_tokens,
+                       SUM(CASE WHEN runs.input_tokens > 272000 THEN 1 ELSE 0 END) AS long_context_runs,
+                       SUM(CASE WHEN runs.input_tokens > 272000 THEN runs.input_tokens ELSE 0 END) AS long_context_input_tokens,
+                       SUM(CASE WHEN runs.input_tokens > 272000 THEN runs.cached_input_tokens ELSE 0 END) AS long_context_cached_input_tokens,
+                       SUM(CASE WHEN runs.input_tokens > 272000 THEN runs.cache_write_input_tokens ELSE 0 END) AS long_context_cache_write_input_tokens,
+                       SUM(CASE WHEN runs.input_tokens > 272000 THEN runs.output_tokens ELSE 0 END) AS long_context_output_tokens,
+                       SUM(runs.command_execution_calls) AS command_execution_calls,
+                       SUM(runs.file_change_calls) AS file_change_calls,
+                       SUM(runs.mcp_tool_calls) AS mcp_tool_calls,
+                       SUM(runs.web_search_calls) AS web_search_calls,
+                       SUM(runs.image_generation_calls) AS image_generation_calls
                 FROM model_runs AS runs
                 LEFT JOIN task_manifests AS manifests ON manifests.task_id = runs.task_id
                 WHERE runs.finished_at >= ?
@@ -980,6 +1051,16 @@ class AgentStore:
                 output_tokens=row["output_tokens"],
                 reasoning_output_tokens=row["reasoning_output_tokens"],
                 total_tokens=row["total_tokens"],
+                long_context_runs=row["long_context_runs"],
+                long_context_input_tokens=row["long_context_input_tokens"],
+                long_context_cached_input_tokens=row["long_context_cached_input_tokens"],
+                long_context_cache_write_input_tokens=row["long_context_cache_write_input_tokens"],
+                long_context_output_tokens=row["long_context_output_tokens"],
+                command_execution_calls=row["command_execution_calls"],
+                file_change_calls=row["file_change_calls"],
+                mcp_tool_calls=row["mcp_tool_calls"],
+                web_search_calls=row["web_search_calls"],
+                image_generation_calls=row["image_generation_calls"],
             )
             for row in rows
         ]
