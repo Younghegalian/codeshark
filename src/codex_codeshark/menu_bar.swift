@@ -1997,44 +1997,6 @@ struct ModelUsageView: View {
         return Array(Set(source.filter { apiModelPrice(for: $0) == nil })).sorted()
     }
 
-    private var longContextRuns: Int {
-        if breakdown == 0 {
-            return groups.reduce(0) { total, group in
-                total + ((apiModelPrice(for: group.model)?.hasLongContextPremium ?? false)
-                    ? group.longContextRuns : 0)
-            }
-        }
-        return projectEntries.reduce(0) { total, entry in
-            total + ((apiModelPrice(for: entry.model)?.hasLongContextPremium ?? false)
-                ? (entry.longContextRuns ?? 0) : 0)
-        }
-    }
-
-    private var observedToolItems: [(label: String, count: Int)] {
-        let entries = breakdown == 0
-            ? (
-                command: groups.reduce(0) { $0 + $1.commandExecutionCalls },
-                changes: groups.reduce(0) { $0 + $1.fileChangeCalls },
-                mcp: groups.reduce(0) { $0 + $1.mcpToolCalls },
-                search: groups.reduce(0) { $0 + $1.webSearchCalls },
-                image: groups.reduce(0) { $0 + $1.imageGenerationCalls }
-            )
-            : (
-                command: projectEntries.reduce(0) { $0 + ($1.commandExecutionCalls ?? 0) },
-                changes: projectEntries.reduce(0) { $0 + ($1.fileChangeCalls ?? 0) },
-                mcp: projectEntries.reduce(0) { $0 + ($1.mcpToolCalls ?? 0) },
-                search: projectEntries.reduce(0) { $0 + ($1.webSearchCalls ?? 0) },
-                image: projectEntries.reduce(0) { $0 + ($1.imageGenerationCalls ?? 0) }
-            )
-        return [
-            ("web search", entries.search),
-            ("image", entries.image),
-            ("MCP", entries.mcp),
-            ("shell", entries.command),
-            ("file change", entries.changes),
-        ].filter { $0.count > 0 }
-    }
-
     private var visibleQuotaBuckets: [DashboardUsageBucket] {
         (model.snapshot.accountUsage?.buckets ?? []).filter { bucket in
             !"\(bucket.limitID) \(bucket.limitName ?? "")"
@@ -2120,16 +2082,7 @@ struct ModelUsageView: View {
             .padding(.vertical, 8)
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Standard-tier text pricing includes cache reads/writes and documented long-context premiums.")
-                Text("Reasoning is already part of output tokens, so it is not counted twice.\(longContextRuns > 0 ? " (longContextRuns) long-context turn(s) applied." : "")")
-                if observedToolItems.isEmpty {
-                    Text("Tool-specific fees, regional processing, and ChatGPT/Codex plan quota are not priced.")
-                } else {
-                    let tools = observedToolItems.map { "\($0.label) \($0.count)" }.joined(separator: " · ")
-                    Text("Observed tools: \(tools). Tool-specific fees, regional processing, and plan quota are not priced.")
-                }
-            }
+            Text("Estimated from recorded token usage and standard API rates.")
             .font(.caption2)
             .foregroundStyle(.secondary)
 
