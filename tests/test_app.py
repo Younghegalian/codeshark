@@ -2179,7 +2179,43 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(session.codex_thread_id, "capacity-thread")
         self.assertTrue(self.app.state.session_interrupted(123, "General"))
         self.assertTrue(self.app.store.has_safe_retry(task.id))
+        self.assertIn("모델: test-model", self.api.messages[-1][1])
         self.assertIn("Attention에서 Continue", self.api.messages[-1][1])
+
+    def test_workflow_continue_bypasses_router_and_triage(self) -> None:
+        self.app.runner = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: paper-revision]]\n"
+            "[[CODESHARK_RESUME: deep|primary]]\n"
+            "continue the manuscript revision",
+            source="telegram",
+            ephemeral=False,
+        )
+        running = self.app.store.claim_next_task(now=task.created_at + 1)
+
+        self.app._execute_task(running)
+
+        self.assertEqual(self.app.runner.project_triage_prompts, [])
+        self.assertEqual(self.app.runner.triage_prompts, [])
+        self.assertTrue(any("primary phase" in prompt[0] for prompt in self.app.runner.prompts))
+
+    def test_workflow_continue_reenters_the_saved_validation_stage(self) -> None:
+        self.app.runner = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: paper-revision]]\n"
+            "[[CODESHARK_RESUME: deep|validator]]\n"
+            "continue the manuscript revision",
+            source="telegram",
+            ephemeral=False,
+        )
+        running = self.app.store.claim_next_task(now=task.created_at + 1)
+
+        self.app._execute_task(running)
+
+        self.assertIn("persisted `validator` stage", self.app.runner.prompts[0][0])
+        self.assertNotIn("primary phase", self.app.runner.prompts[0][0])
 
     def test_started_turn_failure_remains_continuable(self) -> None:
         self.app.runner = FakeCodexRunner(

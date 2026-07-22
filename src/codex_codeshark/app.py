@@ -243,6 +243,11 @@ _LOCAL_RESEARCH_TOOLS_SKILL_CONTENT = """Use the installed local tools when a ta
 _PROJECT_TASK_MARKER = re.compile(
     r"\A\[\[CODESHARK_PROJECT:\s*(?P<project>[^\]\r\n]{1,80})\]\]\r?\n"
 )
+_WORKFLOW_RESUME_MARKER = re.compile(
+    r"\A\[\[CODESHARK_RESUME:\s*(?P<tier>quick|routine|standard|deep|high_assurance)\|"
+    r"(?P<phase>[a-z][a-z-]{0,79})\]\]\r?\n",
+    re.IGNORECASE,
+)
 
 @dataclass(frozen=True)
 class CompletedTask:
@@ -343,6 +348,15 @@ def unpack_project_task(prompt: str) -> tuple[str, str]:
     except ValueError:
         return DEFAULT_PROJECT, prompt
     return project, prompt[match.end() :]
+
+
+def unpack_workflow_resume(prompt: str) -> tuple[str | None, str | None, str]:
+    match = _WORKFLOW_RESUME_MARKER.match(prompt)
+    if match is None:
+        return None, None, prompt
+    tier = match.group("tier").casefold()
+    phase = match.group("phase").casefold()
+    return tier, phase, prompt[match.end() :]
 
 
 class AgentApp:
@@ -885,6 +899,9 @@ class AgentApp:
                                 "message": latest_failure.message,
                                 "finished_at": int(latest_failure.finished_at),
                                 "retry_available": latest_failure.retry_available,
+                                "phase": latest_failure.phase,
+                                "model": latest_failure.model,
+                                "reasoning_effort": latest_failure.reasoning_effort,
                             }
                             if latest_failure is not None
                             else None
@@ -1881,7 +1898,8 @@ class AgentApp:
             DEFAULT_PROJECT,
             task.prompt,
         )
-        if not task.restricted and not task.ephemeral:
+        resume_tier, resume_phase, request = unpack_workflow_resume(request)
+        if not task.restricted and not task.ephemeral and resume_tier is None:
             selected_project = self._route_project_for_task(
                 task,
                 request,
@@ -1922,6 +1940,8 @@ class AgentApp:
         workflow_plan = (
             WorkflowPlan("quick", uses_preflight=False, uses_validator=False)
             if task.restricted
+            else self._workflow_profile(resume_tier.replace("_", "-"))
+            if resume_tier is not None
             else self._workflow_plan(task, request, triage_runner, project)
         )
         execution_runner = (
@@ -2037,6 +2057,7 @@ class AgentApp:
                 automatic_file_delivery=automatic_file_delivery,
                 task_id=task.id,
                 capacity_recovery_runner=runner,
+                resume_phase=resume_phase,
             )
         else:
             if not task.restricted:
@@ -2048,7 +2069,7 @@ class AgentApp:
                 )
             result = self._run_model_phase(
                 task_id=task.id,
-                phase=workflow_plan.tier,
+                phase=resume_phase or workflow_plan.tier,
                 runner=execution_runner,
                 prompt=prompt,
                 thread_id=thread_id,
@@ -2119,11 +2140,18 @@ class AgentApp:
                 clean_message = (clean_message + "\n\n" if clean_message else "") + delivery_notice
         acceptance_passed = successful and not (file_delivery_required and not delivery_files)
         if not task.restricted:
+            checkpoint = self.store.get_task_manifest(task.id)
             self.store.upsert_task_manifest(
                 task.id,
                 project=project,
                 tier=workflow_plan.tier,
-                phase="completed" if acceptance_passed else "needs-follow-up",
+                phase=(
+                    "completed"
+                    if acceptance_passed
+                    else checkpoint.phase
+                    if not successful and checkpoint is not None
+                    else "needs-follow-up"
+                ),
                 acceptance=("user-facing result",)
                 + (("requested artifact",) if file_delivery_required else ()),
                 artifacts=tuple(str(path) for path in (delivery_files or known_files)),
@@ -2485,8 +2513,16 @@ class AgentApp:
             if task_id and self.store.has_safe_retry(task_id)
             else ""
         )
+        context = self.store.task_resume_context(task_id) if task_id else None
+        execution = (
+            f" 실패 단계: {context.phase}; 모델: {context.model}"
+            + (f" ({context.reasoning_effort})" if context.reasoning_effort else "")
+            + "."
+            if context is not None and context.model is not None
+            else ""
+        )
         record = f" 작업 ID: {task_id}." if task_id else ""
-        return f"작업을 완료하지 못했습니다: {cause}{retry}{record}{attention} 상세 진단은 Codeshark Logs에 기록했습니다."
+        return f"작업을 완료하지 못했습니다: {cause}{retry}{execution}{record}{attention} 상세 진단은 Codeshark Logs에 기록했습니다."
 
     def _set_manifest_delivery(
         self,
@@ -3159,9 +3195,36 @@ class AgentApp:
         automatic_file_delivery: bool,
         task_id: str,
         capacity_recovery_runner: CodexRunner,
+        resume_phase: str | None = None,
     ) -> RunResult:
+        if resume_phase in {
+            "validator",
+            "rework",
+            "feedback-verifier",
+            "validation-recovery",
+            "feedback-recovery",
+            "feedback-exhausted",
+            "reconciliation",
+            "finalization",
+        }:
+            return self._resume_cross_validation_stage(
+                runner,
+                rework_runner,
+                validator_runner,
+                feedback_runner,
+                finalizer_runner,
+                request=request,
+                primary_thread_id=thread_id,
+                phase=resume_phase,
+                plan=plan,
+                approved=approved,
+                full_access=full_access,
+                file_delivery_enabled=file_delivery_enabled,
+                automatic_file_delivery=automatic_file_delivery,
+                task_id=task_id,
+            )
         preflight = ""
-        if plan.uses_preflight:
+        if plan.uses_preflight and resume_phase in {None, "preflight"}:
             preflight_result = self._run_model_phase(
                 task_id=task_id,
                 phase="preflight",
@@ -3182,7 +3245,7 @@ class AgentApp:
             else:
                 LOGGER.warning("workflow preflight failed: %s", preflight_result.stderr)
         research = ""
-        if plan.uses_research:
+        if plan.uses_research and resume_phase in {None, "preflight", "research"}:
             research_result = self._run_model_phase(
                 task_id=task_id,
                 phase="research",
@@ -3220,11 +3283,16 @@ class AgentApp:
             primary_prompt += self._preflight_handoff_prompt(preflight)
         if research:
             primary_prompt += self._research_handoff_prompt(research)
+        primary_phase = "capacity-recovery" if resume_phase == "capacity-recovery" else "primary"
         primary_result = self._run_model_phase(
             task_id=task_id,
-            phase="primary",
-            runner=runner,
-            prompt=primary_prompt,
+            phase=primary_phase,
+            runner=capacity_recovery_runner if resume_phase == "capacity-recovery" else runner,
+            prompt=(
+                primary_prompt + self._model_capacity_recovery_prompt()
+                if resume_phase == "capacity-recovery"
+                else primary_prompt
+            ),
             thread_id=thread_id,
             ephemeral=False,
             restricted=False,
@@ -3283,17 +3351,49 @@ class AgentApp:
                 approved=approved,
                 full_access=full_access,
             )
+        return self._continue_cross_validation_after_validator(
+            runner,
+            rework_runner,
+            feedback_runner,
+            finalizer_runner,
+            request=request,
+            primary_thread_id=primary_result.thread_id,
+            findings=validator_result.message,
+            plan=plan,
+            approved=approved,
+            full_access=full_access,
+            file_delivery_enabled=file_delivery_enabled,
+            automatic_file_delivery=automatic_file_delivery,
+            task_id=task_id,
+        )
 
+    def _continue_cross_validation_after_validator(
+        self,
+        primary_runner: CodexRunner,
+        rework_runner: CodexRunner,
+        feedback_runner: CodexRunner,
+        finalizer_runner: CodexRunner,
+        *,
+        request: str,
+        primary_thread_id: str | None,
+        findings: str,
+        plan: WorkflowPlan,
+        approved: bool,
+        full_access: bool,
+        file_delivery_enabled: bool,
+        automatic_file_delivery: bool,
+        task_id: str,
+    ) -> RunResult:
         if plan.feedback_iterations:
             if plan.uses_adversarial_review:
                 return self._run_feedback_loop(
-                    runner,
+                    primary_runner,
                     rework_runner,
                     feedback_runner,
                     finalizer_runner,
                     request=request,
-                    primary_thread_id=primary_result.thread_id,
-                    initial_findings=validator_result.message,
+                    primary_thread_id=primary_thread_id,
+                    initial_findings=findings,
                     iterations=plan.feedback_iterations,
                     approved=approved,
                     full_access=full_access,
@@ -3303,11 +3403,189 @@ class AgentApp:
                     use_finalizer=plan.uses_finalizer,
                 )
             return self._run_rework_cycles(
-                runner,
+                primary_runner,
                 rework_runner,
                 finalizer_runner,
-                primary_thread_id=primary_result.thread_id,
-                initial_findings=validator_result.message,
+                primary_thread_id=primary_thread_id,
+                initial_findings=findings,
+                iterations=plan.feedback_iterations,
+                approved=approved,
+                full_access=full_access,
+                file_delivery_enabled=file_delivery_enabled,
+                automatic_file_delivery=automatic_file_delivery,
+                task_id=task_id,
+                use_finalizer=plan.uses_finalizer,
+            )
+        return self._finalize_cross_validation(
+            primary_runner,
+            finalizer_runner,
+            primary_thread_id=primary_thread_id,
+            findings=findings,
+            use_finalizer=plan.uses_finalizer,
+            approved=approved,
+            full_access=full_access,
+            file_delivery_enabled=file_delivery_enabled,
+            automatic_file_delivery=automatic_file_delivery,
+            task_id=task_id,
+        )
+
+    def _finalize_cross_validation(
+        self,
+        primary_runner: CodexRunner,
+        finalizer_runner: CodexRunner,
+        *,
+        primary_thread_id: str | None,
+        findings: str,
+        use_finalizer: bool,
+        approved: bool,
+        full_access: bool,
+        file_delivery_enabled: bool,
+        automatic_file_delivery: bool,
+        task_id: str,
+    ) -> RunResult:
+        reconciliation_prompt = self._cross_reconciliation_prompt(findings)
+        if file_delivery_enabled:
+            reconciliation_prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
+        return self._run_model_phase(
+            task_id=task_id,
+            phase="finalization" if use_finalizer else "reconciliation",
+            runner=finalizer_runner if use_finalizer else primary_runner,
+            prompt=reconciliation_prompt,
+            thread_id=primary_thread_id,
+            ephemeral=False,
+            restricted=False,
+            approved=approved,
+            full_access=full_access,
+        )
+
+    def _resume_cross_validation_stage(
+        self,
+        primary_runner: CodexRunner,
+        rework_runner: CodexRunner,
+        validator_runner: CodexRunner,
+        feedback_runner: CodexRunner,
+        finalizer_runner: CodexRunner,
+        *,
+        request: str,
+        primary_thread_id: str | None,
+        phase: str,
+        plan: WorkflowPlan,
+        approved: bool,
+        full_access: bool,
+        file_delivery_enabled: bool,
+        automatic_file_delivery: bool,
+        task_id: str,
+    ) -> RunResult:
+        continuation_prompt = self._workflow_resume_phase_prompt(request, phase)
+        if phase == "validator":
+            validator_result, failed_sessions, cancelled = self._run_fresh_validator(
+                validator_runner,
+                continuation_prompt,
+                task_id=task_id,
+                phase="validator",
+            )
+            if cancelled is not None:
+                return replace(cancelled, thread_id=primary_thread_id)
+            if validator_result is None:
+                return self._run_model_phase(
+                    task_id=task_id,
+                    phase="validation-recovery",
+                    runner=primary_runner,
+                    prompt=self._cross_validation_recovery_prompt(failed_sessions),
+                    thread_id=primary_thread_id,
+                    ephemeral=False,
+                    restricted=False,
+                    approved=approved,
+                    full_access=full_access,
+                )
+            return self._continue_cross_validation_after_validator(
+                primary_runner,
+                rework_runner,
+                feedback_runner,
+                finalizer_runner,
+                request=request,
+                primary_thread_id=primary_thread_id,
+                findings=validator_result.message,
+                plan=plan,
+                approved=approved,
+                full_access=full_access,
+                file_delivery_enabled=file_delivery_enabled,
+                automatic_file_delivery=automatic_file_delivery,
+                task_id=task_id,
+            )
+
+        if phase == "rework":
+            rework_result = self._run_model_phase(
+                task_id=task_id,
+                phase="rework",
+                runner=rework_runner,
+                prompt=continuation_prompt,
+                thread_id=primary_thread_id,
+                ephemeral=False,
+                restricted=False,
+                approved=approved,
+                full_access=full_access,
+            )
+            if not self._run_succeeded(rework_result):
+                return rework_result
+            if not plan.uses_adversarial_review:
+                return self._finalize_cross_validation(
+                    primary_runner,
+                    finalizer_runner,
+                    primary_thread_id=rework_result.thread_id or primary_thread_id,
+                    findings=rework_result.message,
+                    use_finalizer=plan.uses_finalizer,
+                    approved=approved,
+                    full_access=full_access,
+                    file_delivery_enabled=file_delivery_enabled,
+                    automatic_file_delivery=automatic_file_delivery,
+                    task_id=task_id,
+                )
+            phase = "feedback-verifier"
+            primary_thread_id = rework_result.thread_id or primary_thread_id
+
+        if phase == "feedback-verifier":
+            verification, failed_sessions, cancelled = self._run_fresh_validator(
+                feedback_runner,
+                self._workflow_resume_phase_prompt(request, "feedback-verifier"),
+                task_id=task_id,
+                phase="feedback-verifier",
+            )
+            if cancelled is not None:
+                return replace(cancelled, thread_id=primary_thread_id)
+            if verification is None:
+                return self._run_model_phase(
+                    task_id=task_id,
+                    phase="feedback-recovery",
+                    runner=rework_runner,
+                    prompt=self._cross_validation_recovery_prompt(failed_sessions),
+                    thread_id=primary_thread_id,
+                    ephemeral=False,
+                    restricted=False,
+                    approved=approved,
+                    full_access=full_access,
+                )
+            if self._validator_passed(verification.message):
+                return self._finalize_cross_validation(
+                    primary_runner,
+                    finalizer_runner,
+                    primary_thread_id=primary_thread_id,
+                    findings=verification.message,
+                    use_finalizer=plan.uses_finalizer,
+                    approved=approved,
+                    full_access=full_access,
+                    file_delivery_enabled=file_delivery_enabled,
+                    automatic_file_delivery=automatic_file_delivery,
+                    task_id=task_id,
+                )
+            return self._run_feedback_loop(
+                primary_runner,
+                rework_runner,
+                feedback_runner,
+                finalizer_runner,
+                request=request,
+                primary_thread_id=primary_thread_id,
+                initial_findings=verification.message,
                 iterations=plan.feedback_iterations,
                 approved=approved,
                 full_access=full_access,
@@ -3317,19 +3595,41 @@ class AgentApp:
                 use_finalizer=plan.uses_finalizer,
             )
 
-        reconciliation_prompt = self._cross_reconciliation_prompt(validator_result.message)
-        if file_delivery_enabled:
-            reconciliation_prompt += self._file_delivery_prompt(automatic=automatic_file_delivery)
+        runner = (
+            rework_runner
+            if phase == "feedback-recovery"
+            else finalizer_runner
+            if phase in {"finalization", "feedback-exhausted"} and plan.uses_finalizer
+            else primary_runner
+        )
         return self._run_model_phase(
             task_id=task_id,
-            phase="finalization" if plan.uses_finalizer else "reconciliation",
-            runner=finalizer_runner if plan.uses_finalizer else runner,
-            prompt=reconciliation_prompt,
-            thread_id=primary_result.thread_id,
+            phase=phase,
+            runner=runner,
+            prompt=continuation_prompt,
+            thread_id=primary_thread_id,
             ephemeral=False,
             restricted=False,
             approved=approved,
             full_access=full_access,
+        )
+
+    @staticmethod
+    def _workflow_resume_phase_prompt(request: str, phase: str) -> str:
+        return "\n".join(
+            (
+                "[Persisted workflow continuation]",
+                f"Resume exactly the persisted `{phase}` stage of the existing workflow.",
+                "Do not rerun project routing, task triage, or completed stages. Inspect the existing workspace, "
+                "artifacts, and available session context before acting. Preserve completed work and do not repeat "
+                "external side effects. Complete this stage's responsibility and provide the handoff needed by its "
+                "remaining workflow stages.",
+                "",
+                "[Original request]",
+                request,
+                "[/Original request]",
+                "[/Persisted workflow continuation]",
+            )
         )
 
     @staticmethod
@@ -3444,7 +3744,7 @@ class AgentApp:
         rework_runner: CodexRunner,
         finalizer_runner: CodexRunner,
         *,
-        primary_thread_id: str,
+        primary_thread_id: str | None,
         initial_findings: str,
         iterations: int,
         approved: bool,
@@ -3494,7 +3794,7 @@ class AgentApp:
         finalizer_runner: CodexRunner,
         *,
         request: str,
-        primary_thread_id: str,
+        primary_thread_id: str | None,
         initial_findings: str,
         iterations: int,
         approved: bool,
@@ -3601,6 +3901,7 @@ class AgentApp:
         full_access: bool = False,
     ) -> RunResult:
         if task_id is not None:
+            self.store.mark_task_manifest_phase(task_id, phase)
             self._set_active_task_phase(task_id, runner, self._dashboard_phase(phase))
         started_at = time.time()
         result = runner.run(

@@ -172,11 +172,23 @@ class ModelRunLog:
 
 
 @dataclass(frozen=True)
+class TaskResumeContext:
+    project: str
+    tier: str
+    phase: str
+    model: str | None
+    reasoning_effort: str | None
+
+
+@dataclass(frozen=True)
 class TaskFailure:
     task_id: str
     message: str
     finished_at: float
     retry_available: bool
+    phase: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -850,6 +862,16 @@ class AgentStore:
                 ),
             )
 
+    def mark_task_manifest_phase(self, task_id: str, phase: str) -> None:
+        normalized = " ".join(phase.split())[:80]
+        if not normalized:
+            return
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE task_manifests SET phase = ?, updated_at = ? WHERE task_id = ?",
+                (normalized, time.time(), task_id),
+            )
+
     def get_task_manifest(self, task_id: str) -> TaskManifest | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -1224,12 +1246,54 @@ class AgentStore:
         diagnostic = str(row["error"] or "")
         capacity_continuation = bool(_MODEL_CAPACITY_ERROR.search(diagnostic))
         message = " ".join(diagnostic.split())[:180]
+        context = self.task_resume_context(str(row["id"]))
         return TaskFailure(
             task_id=row["id"],
             message=message or "Task failed without a diagnostic message.",
             finished_at=row["finished_at"],
             retry_available=bool(row["retry_available"]) or capacity_continuation,
+            phase=context.phase if context is not None else None,
+            model=context.model if context is not None else None,
+            reasoning_effort=context.reasoning_effort if context is not None else None,
         )
+
+    @staticmethod
+    def _resume_context(
+        connection: sqlite3.Connection,
+        task_id: str,
+    ) -> TaskResumeContext | None:
+        row = connection.execute(
+            """
+            SELECT manifests.project, manifests.tier, manifests.phase AS manifest_phase,
+                   latest_run.phase AS run_phase, latest_run.model, latest_run.reasoning_effort
+            FROM task_manifests AS manifests
+            LEFT JOIN model_runs AS latest_run
+              ON latest_run.id = (
+                  SELECT id FROM model_runs
+                  WHERE task_id = manifests.task_id
+                  ORDER BY id DESC LIMIT 1
+              )
+            WHERE manifests.task_id = ?
+            """,
+            (task_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        manifest_phase = str(row["manifest_phase"] or "")
+        last_phase = str(row["run_phase"] or "")
+        phase = last_phase if manifest_phase in {"", "routing", "needs-follow-up"} and last_phase else manifest_phase
+        project = " ".join(str(row["project"] or "").split())[:80]
+        tier = " ".join(str(row["tier"] or "").split())[:40]
+        phase = " ".join(phase.split())[:80]
+        if not all((project, tier, phase)):
+            return None
+        model = " ".join(str(row["model"] or "").split()) or None
+        reasoning_effort = " ".join(str(row["reasoning_effort"] or "").split()) or None
+        return TaskResumeContext(project, tier, phase, model, reasoning_effort)
+
+    def task_resume_context(self, task_id: str) -> TaskResumeContext | None:
+        with self._connect() as connection:
+            return self._resume_context(connection, task_id)
 
     def record_artifact_receipt(
         self,
@@ -1449,24 +1513,11 @@ class AgentStore:
                 "SELECT prompt FROM task_retry_payloads WHERE task_id = ? AND expires_at >= ?",
                 (task_id, time.time()),
             ).fetchone()
+            context = self._resume_context(connection, task_id)
             prompt = str(payload["prompt"]) if payload is not None else ""
-            if prompt:
-                prompt += (
-                    "\n\n[Retry continuation]\n"
-                    "Resume the interrupted task from its existing project session and workspace if available. "
-                    "Inspect actual files, recent artifacts, and completed changes before acting. Do not repeat "
-                    "completed work or external side effects; finish the original requested outcome.\n"
-                    "[/Retry continuation]"
-                )
             if not prompt and _MODEL_CAPACITY_ERROR.search(str(task["error"] or "")):
-                manifest = connection.execute(
-                    "SELECT project FROM task_manifests WHERE task_id = ?",
-                    (task_id,),
-                ).fetchone()
-                if manifest is not None and str(manifest["project"]).strip():
-                    project = " ".join(str(manifest["project"]).split())[:80]
+                if context is not None:
                     prompt = (
-                        f"[[CODESHARK_PROJECT: {project}]]\n"
                         "[Capacity continuation]\n"
                         "Continue the interrupted task from this project's existing Codex session and workspace. "
                         "Inspect actual files, recent artifacts, and completed changes before acting. Do not repeat "
@@ -1475,6 +1526,26 @@ class AgentStore:
                     )
             if not prompt:
                 return None
+            if context is not None:
+                prompt = re.sub(
+                    r"\A\[\[CODESHARK_PROJECT:\s*[^\]\r\n]{1,80}\]\]\r?\n",
+                    "",
+                    prompt,
+                    count=1,
+                )
+                prompt = (
+                    f"[[CODESHARK_PROJECT: {context.project}]]\n"
+                    f"[[CODESHARK_RESUME: {context.tier.replace('-', '_')}|{context.phase}]]\n"
+                    + prompt
+                )
+            prompt += (
+                "\n\n[Retry continuation]\n"
+                "Resume the interrupted task from its existing project session and workspace if available. "
+                "Do not rerun project routing, task triage, or any completed workflow stage. Inspect actual files, "
+                "recent artifacts, and completed changes before acting. Do not repeat completed work or external "
+                "side effects; finish the original requested outcome.\n"
+                "[/Retry continuation]"
+            )
             retry_id = "t" + uuid.uuid4().hex[:10]
             now = time.time()
             connection.execute(

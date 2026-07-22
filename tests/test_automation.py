@@ -76,6 +76,18 @@ class AgentStoreTests(unittest.TestCase):
                 tier="deep",
                 phase="needs-follow-up",
             )
+            store.record_model_run(
+                task_id=running.id,
+                phase="primary",
+                role="Primary",
+                model="gpt-5.6-terra",
+                reasoning_effort="xhigh",
+                started_at=100.0,
+                finished_at=200.0,
+                exit_code=1,
+                cancelled=False,
+                timed_out=False,
+            )
             self.assertTrue(
                 store.finish_task(
                     running.id,
@@ -87,11 +99,15 @@ class AgentStoreTests(unittest.TestCase):
             failure = store.latest_failure()
             self.assertIsNotNone(failure)
             self.assertTrue(failure.retry_available)
+            self.assertEqual(failure.phase, "primary")
+            self.assertEqual(failure.model, "gpt-5.6-terra")
+            self.assertEqual(failure.reasoning_effort, "xhigh")
 
             retry = store.retry_failed_task(running.id)
 
             self.assertIsNotNone(retry)
             self.assertIn("[[CODESHARK_PROJECT: paper-revision]]", retry.prompt)
+            self.assertIn("[[CODESHARK_RESUME: deep|primary]]", retry.prompt)
             self.assertIn("[Capacity continuation]", retry.prompt)
             self.assertEqual(retry.status, "queued")
 

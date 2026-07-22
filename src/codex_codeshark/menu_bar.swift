@@ -26,11 +26,16 @@ struct DashboardFailure: Decodable {
     let taskID: String
     let message: String
     let retryAvailable: Bool?
+    let phase: String?
+    let model: String?
+    let reasoningEffort: String?
 
     enum CodingKeys: String, CodingKey {
         case taskID = "task_id"
         case message
         case retryAvailable = "retry_available"
+        case phase, model
+        case reasoningEffort = "reasoning_effort"
     }
 }
 
@@ -1738,6 +1743,15 @@ struct AttentionView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
+                                if let model = failure.model {
+                                    Text(
+                                        [failure.phase, model, failure.reasoningEffort]
+                                            .compactMap { $0 }
+                                            .joined(separator: " · ")
+                                    )
+                                    .font(.caption2.monospaced())
+                                    .foregroundStyle(.secondary)
+                                }
                                 HStack(spacing: 8) {
                                     Button("Continue") {
                                         retryTask(failure.taskID)
