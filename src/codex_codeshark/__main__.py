@@ -96,6 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--router-effort")
     models.add_argument("--triage")
     models.add_argument("--triage-effort")
+    models.add_argument("--delivery")
+    models.add_argument("--delivery-effort")
     models.add_argument("--preflight", required=True)
     models.add_argument("--preflight-effort", required=True)
     models.add_argument("--research")
@@ -300,6 +302,8 @@ def main() -> int:
                 router_reasoning_effort=args.router_effort,
                 triage_model=args.triage,
                 triage_reasoning_effort=args.triage_effort,
+                delivery_model=args.delivery,
+                delivery_reasoning_effort=args.delivery_effort,
                 preflight_model=args.preflight,
                 preflight_reasoning_effort=args.preflight_effort,
                 research_model=args.research,
@@ -315,6 +319,7 @@ def main() -> int:
                 f"feedback={config.feedback_model}, "
                 f"router={config.router_model}, "
                 f"triage={config.triage_model}, "
+                f"delivery={config.delivery_model}, "
                 f"preflight={config.preflight_model}, research={config.research_model}, "
                 f"finalizer={config.finalizer_model}"
             )

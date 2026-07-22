@@ -16,7 +16,7 @@ from codex_codeshark.identity import (
     owner_onboarding_message,
 )
 from codex_codeshark.local_console import LOCAL_CONSOLE_SOURCE
-from codex_codeshark.projects import discover_workspace_projects
+from codex_codeshark.projects import DEFAULT_PROJECT, discover_workspace_projects
 from codex_codeshark.telegram_api import TelegramError
 
 
@@ -50,13 +50,16 @@ class FakeCodexRunner:
         *,
         triage_message: str | None = None,
         project_triage_message: str | None = None,
+        delivery_message: str | None = None,
     ) -> None:
         self.model = "test-model"
         self.prompts = []
         self.triage_prompts = []
         self.project_triage_prompts = []
+        self.delivery_prompts = []
         self.triage_message = triage_message
         self.project_triage_message = project_triage_message
+        self.delivery_message = delivery_message
         self.deleted_sessions = []
         self.delete_error = None
         self.steers = []
@@ -97,6 +100,14 @@ class FakeCodexRunner:
             return RunResult(
                 exit_code=0,
                 message=self.triage_message or self._default_triage_message(prompt),
+                thread_id=None,
+                stderr="",
+            )
+        if prompt.startswith("[Codeshark delivery assessment]"):
+            self.delivery_prompts.append((prompt, thread_id, ephemeral, restricted, approved, full_access))
+            return RunResult(
+                exit_code=0,
+                message=self.delivery_message or '{"mode": "none", "reason": "test"}',
                 thread_id=None,
                 stderr="",
             )
@@ -763,7 +774,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn("The project codename is Aurora", runner.prompts[0][0])
 
-    def test_natural_file_request_attaches_latest_completed_result_without_runner(self) -> None:
+    def test_natural_file_request_is_decided_by_the_delivery_agent(self) -> None:
         report = self.config.workdir / "completed-result.pdf"
         report.write_bytes(b"%PDF-safe-result")
         queued = self.app.store.enqueue_task(
@@ -782,15 +793,19 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             phase="completed",
             artifacts=(str(report),),
         )
-        runner = FakeCodexRunner()
+        runner = FakeCodexRunner(
+            delivery_message='{"mode": "recent", "reason": "the user requested the completed result"}'
+        )
         self.app.runner = runner
 
         self.app._handle_update(self.update(123, "PDF 보내줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
 
         self.assertEqual(self.api.documents[0][0], 123)
         self.assertEqual(self.api.documents[0][1], report.resolve())
-        self.assertEqual(runner.prompts, [])
-        self.assertEqual(self.app.store.pending_count(), 0)
+        self.assertEqual(len(runner.delivery_prompts), 1)
+        self.assertEqual(len(runner.prompts), 1)
 
     def test_group_task_has_no_admin_context_session_or_learning_access(self) -> None:
         group_id = -100123
@@ -1029,15 +1044,16 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["model_assignments"][1]["role"], "Routine execution")
         self.assertEqual(payload["model_assignments"][2]["role"], "Project Router")
         self.assertEqual(payload["model_assignments"][3]["role"], "Triage")
-        self.assertEqual(payload["model_assignments"][4]["role"], "Planning")
-        self.assertEqual(payload["model_assignments"][6]["model"], "gpt-5.6-sol")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Primary execution")
-        self.assertEqual(payload["model_assignments"][6]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][6]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][7]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][8]["role"], "Independent review")
-        self.assertEqual(payload["model_assignments"][9]["role"], "Adversarial review")
-        self.assertEqual(payload["model_assignments"][10]["role"], "Finalization")
+        self.assertEqual(payload["model_assignments"][4]["role"], "Delivery assessment")
+        self.assertEqual(payload["model_assignments"][5]["role"], "Planning")
+        self.assertEqual(payload["model_assignments"][7]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][7]["role"], "Primary execution")
+        self.assertEqual(payload["model_assignments"][7]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][7]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][8]["role"], "Rework")
+        self.assertEqual(payload["model_assignments"][9]["role"], "Independent review")
+        self.assertEqual(payload["model_assignments"][10]["role"], "Adversarial review")
+        self.assertEqual(payload["model_assignments"][11]["role"], "Finalization")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
@@ -1410,7 +1426,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(task)
 
         self.assertIn("Answer in English", runner.prompts[0][0])
-        self.assertTrue(runner.prompts[0][0].endswith("do work"))
+        self.assertIn("[Current user request]\ndo work", runner.prompts[0][0])
 
     def test_project_switch_isolates_temporary_session_and_long_term_context(self) -> None:
         (self.config.workdir / "Research").mkdir()
@@ -1950,6 +1966,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(self.app._feedback_runners), self.config.worker_count)
         self.assertEqual(len(self.app._project_router_runners), self.config.worker_count)
         self.assertEqual(len(self.app._triage_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._delivery_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         self.assertEqual(len(self.app._research_runners), self.config.worker_count)
         self.assertEqual(len(self.app._finalizer_runners), self.config.worker_count)
@@ -2011,6 +2028,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.triage_model
                 and runner.model_reasoning_effort == self.config.triage_reasoning_effort
                 for runner in self.app._triage_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.delivery_model
+                and runner.model_reasoning_effort == self.config.delivery_reasoning_effort
+                for runner in self.app._delivery_runners
             )
         )
         self.assertTrue(
@@ -2264,7 +2288,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message=f"[[CODESHARK_SEND_FILE: {report}]]",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested output"}',
         )
 
         self.app._handle_update(self.update(123, "작업한 결과파일 보여줘"))
@@ -2284,7 +2309,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message=f"PDF here is the latest result.\n\n- [{report.name}]({report})",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested PDF"}',
         )
 
         self.app._handle_update(self.update(123, "Pdf 보내줘"))
@@ -2304,7 +2330,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message=f"Final PDF: [[CODESHARK_SEND_FILE: {report}]] is ready.",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested PDF"}',
         )
 
         self.app._handle_update(self.update(123, "PDF 보내줘"))
@@ -2324,7 +2351,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message=f"Final PDF: [{report.name}]({report}) is ready.",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested PDF"}',
         )
 
         self.app._handle_update(self.update(123, "PDF 보내줘"))
@@ -2342,7 +2370,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message="I sent the PDF.",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested PDF"}',
         )
 
         self.app._handle_update(self.update(123, "PDF 보내줘"))
@@ -2372,7 +2401,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message="The report is complete.",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested PDF"}',
         )
 
         self.app._handle_update(self.update(123, "PDF 보내줘"))
@@ -2382,6 +2412,69 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.documents[0][1], report.resolve())
         self.assertEqual(self.api.events[0][0], "document")
         self.assertEqual(self.api.messages, [(123, "The report is complete.")])
+
+    def test_delivery_agent_attaches_recent_artifacts_for_a_contextual_follow_up(self) -> None:
+        report = self.app.config.workdir / "collisions_per_hour.png"
+        report.write_bytes(b"PNG")
+        previous = self.app.store.enqueue_task(
+            123,
+            "complete the production calculation",
+            source="telegram",
+            ephemeral=False,
+        )
+        claimed_previous = self.app.store.claim_next_task()
+        self.assertEqual(claimed_previous.id, previous.id)
+        self.app.store.finish_task(previous.id, "completed", "")
+        self.app.store.upsert_task_manifest(
+            previous.id,
+            project=DEFAULT_PROJECT,
+            tier="quick",
+            phase="completed",
+            artifacts=(str(report),),
+            delivery_state="not-requested",
+        )
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message="The requested result is attached.",
+                thread_id="thread-new",
+                stderr="",
+            ),
+            delivery_message='{"mode": "recent", "reason": "contextual request for the prior output"}',
+        )
+
+        self.app._handle_update(self.update(123, "보자"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(self.api.messages, [(123, "The requested result is attached.")])
+        prompt = self.app.runner.delivery_prompts[0][0]
+        self.assertIn(report.name, prompt)
+        self.assertNotIn(str(report), prompt)
+
+    def test_telegram_response_redacts_any_host_path_without_delivery(self) -> None:
+        report = self.app.config.workdir / "final-report.pdf"
+        report.write_bytes(b"%PDF-1.4")
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=0,
+                message=f"Open [final report]({report}) or {report}.",
+                thread_id="thread-new",
+                stderr="",
+            ),
+            delivery_message='{"mode": "none", "reason": "no attachment requested"}',
+        )
+
+        self.app._handle_update(self.update(123, "작업 결과를 요약해줘"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertEqual(self.api.documents, [])
+        response = self.api.messages[-1][1]
+        self.assertNotIn(str(report), response)
+        self.assertNotIn(str(self.app.config.workdir), response)
+        self.assertIn(report.name, response)
 
     def test_cross_validation_runs_primary_validator_and_reconciliation_sessions(self) -> None:
         app = AgentApp(
@@ -2963,7 +3056,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 message=f"Final PDF is ready.\n\n- [{report.name}]({report})",
                 thread_id="thread-new",
                 stderr="",
-            )
+            ),
+            delivery_message='{"mode": "result", "reason": "requested manuscript"}',
         )
 
         self.app._handle_update(self.update(123, "이제 이거 내용대로 해서 완성본을 만들어줘"))

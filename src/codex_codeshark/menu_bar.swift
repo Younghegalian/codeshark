@@ -2888,7 +2888,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 714),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 756),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2901,29 +2901,30 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Role Models")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 16, y: 678, width: 588, height: 20)
+        title.frame = NSRect(x: 16, y: 720, width: 588, height: 20)
         content.addSubview(title)
 
-        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope before Triage. Quick uses the low-cost Quick executor; Routine uses the general executor.")
+        let detail = NSTextField(wrappingLabelWithString: "Project Router chooses scope; Delivery Assessment decides whether Telegram should attach a result; Triage chooses the execution tier.")
         detail.font = .systemFont(ofSize: 12)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 16, y: 646, width: 588, height: 18)
+        detail.frame = NSRect(x: 16, y: 678, width: 588, height: 28)
         content.addSubview(detail)
 
         let modelHeader = NSTextField(labelWithString: "MODEL")
         modelHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         modelHeader.textColor = .secondaryLabelColor
-        modelHeader.frame = NSRect(x: 170, y: 620, width: 245, height: 14)
+        modelHeader.frame = NSRect(x: 170, y: 648, width: 245, height: 14)
         content.addSubview(modelHeader)
         let effortHeader = NSTextField(labelWithString: "REASONING")
         effortHeader.font = .systemFont(ofSize: 10, weight: .semibold)
         effortHeader.textColor = .secondaryLabelColor
-        effortHeader.frame = NSRect(x: 425, y: 620, width: 179, height: 14)
+        effortHeader.frame = NSRect(x: 425, y: 648, width: 179, height: 14)
         content.addSubview(effortHeader)
 
         let roles = [
             ("Project Router", "Project Router", "gpt-5.4-mini", "low"),
             ("Triage", "Triage", "gpt-5.4-mini", "low"),
+            ("Delivery Assessment", "Delivery assessment", "gpt-5.4-mini", "low"),
             ("Quick execution", "Quick execution", "gpt-5.4-mini", "low"),
             ("Routine execution", "Routine execution", "gpt-5.6-luna", "low"),
             ("Planning", "Planning", "gpt-5.6-luna", "low"),
@@ -2947,7 +2948,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "Adversarial review": "Adversarial Review",
         ]
         for (index, role) in roles.enumerated() {
-            let y = 562 - (index * 46)
+            let y = 602 - (index * 44)
             let label = NSTextField(labelWithString: role.0)
             label.font = .systemFont(ofSize: 12, weight: .medium)
             label.frame = NSRect(x: 16, y: y + 18, width: 145, height: 16)
@@ -3075,6 +3076,9 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let triagePicker = modelPickers["Triage"],
               let triage = selectedModel(triagePicker),
               let triageEffort = reasoningPickers["Triage"]?.titleOfSelectedItem,
+              let deliveryPicker = modelPickers["Delivery assessment"],
+              let delivery = selectedModel(deliveryPicker),
+              let deliveryEffort = reasoningPickers["Delivery assessment"]?.titleOfSelectedItem,
               let preflightPicker = modelPickers["Planning"],
               let preflight = selectedModel(preflightPicker),
               let preflightEffort = reasoningPickers["Planning"]?.titleOfSelectedItem,
@@ -3110,6 +3114,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--router-effort", routerEffort,
             "--triage", triage,
             "--triage-effort", triageEffort,
+            "--delivery", delivery,
+            "--delivery-effort", deliveryEffort,
             "--preflight", preflight,
             "--preflight-effort", preflightEffort,
             "--research", research,

@@ -82,6 +82,8 @@ class Config:
     router_reasoning_effort: str = "low"
     triage_model: str = "gpt-5.4-mini"
     triage_reasoning_effort: str = "low"
+    delivery_model: str = "gpt-5.4-mini"
+    delivery_reasoning_effort: str = "low"
     preflight_model: str = "gpt-5.6-luna"
     preflight_reasoning_effort: str = "low"
     research_model: str = "gpt-5.6-luna"
@@ -331,6 +333,10 @@ def load_config(path: Path | None = None) -> Config:
     triage_reasoning_effort = _require_reasoning_effort(
         data, "triage_reasoning_effort", "low"
     )
+    delivery_model = _require_model_setting(data, "delivery_model", "gpt-5.4-mini")
+    delivery_reasoning_effort = _require_reasoning_effort(
+        data, "delivery_reasoning_effort", "low"
+    )
     router_model = _require_model_setting(data, "router_model", "gpt-5.4-mini")
     router_reasoning_effort = _require_reasoning_effort(
         data, "router_reasoning_effort", "low"
@@ -526,6 +532,8 @@ def load_config(path: Path | None = None) -> Config:
         router_reasoning_effort=router_reasoning_effort,
         triage_model=triage_model,
         triage_reasoning_effort=triage_reasoning_effort,
+        delivery_model=delivery_model,
+        delivery_reasoning_effort=delivery_reasoning_effort,
         preflight_model=preflight_model,
         preflight_reasoning_effort=preflight_reasoning_effort,
         research_model=research_model,
@@ -640,6 +648,8 @@ def set_model_assignments(
     router_reasoning_effort: str | None = None,
     triage_model: str | None = None,
     triage_reasoning_effort: str | None = None,
+    delivery_model: str | None = None,
+    delivery_reasoning_effort: str | None = None,
     preflight_reasoning_effort: str | None = None,
     research_model: str | None = None,
     research_reasoning_effort: str | None = None,
@@ -668,6 +678,10 @@ def set_model_assignments(
         "router_reasoning_effort": router_reasoning_effort or current.router_reasoning_effort,
         "triage_model": triage_model or current.triage_model,
         "triage_reasoning_effort": triage_reasoning_effort or current.triage_reasoning_effort,
+        "delivery_model": delivery_model or current.delivery_model,
+        "delivery_reasoning_effort": (
+            delivery_reasoning_effort or current.delivery_reasoning_effort
+        ),
         "preflight_model": preflight_model,
         "preflight_reasoning_effort": preflight_reasoning_effort or current.preflight_reasoning_effort,
         "research_model": research_model or current.research_model,
@@ -1243,6 +1257,8 @@ def write_local_config(
             'router_reasoning_effort = "low"',
             'triage_model = "gpt-5.4-mini"',
             'triage_reasoning_effort = "low"',
+            'delivery_model = "gpt-5.4-mini"',
+            'delivery_reasoning_effort = "low"',
             'preflight_model = "gpt-5.6-luna"',
             'preflight_reasoning_effort = "low"',
             'research_model = "gpt-5.6-luna"',
