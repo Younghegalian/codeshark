@@ -794,7 +794,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             artifacts=(str(report),),
         )
         runner = FakeCodexRunner(
-            delivery_message='{"mode": "recent", "reason": "the user requested the completed result"}'
+            delivery_message=(
+                '{"mode": "recent", "artifact_indexes": [1], '
+                '"reason": "the user requested the completed result"}'
+            )
         )
         self.app.runner = runner
 
@@ -2415,7 +2418,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_delivery_agent_attaches_recent_artifacts_for_a_contextual_follow_up(self) -> None:
         report = self.app.config.workdir / "collisions_per_hour.png"
+        data = self.app.config.workdir / "collisions_per_hour.csv"
+        readme = self.app.config.workdir / "README.md"
         report.write_bytes(b"PNG")
+        data.write_text("hour,count\n", encoding="utf-8")
+        readme.write_text("supporting notes", encoding="utf-8")
         previous = self.app.store.enqueue_task(
             123,
             "complete the production calculation",
@@ -2430,7 +2437,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             project=DEFAULT_PROJECT,
             tier="quick",
             phase="completed",
-            artifacts=(str(report),),
+            artifacts=(str(report), str(data), str(readme)),
             delivery_state="not-requested",
         )
         self.app.runner = FakeCodexRunner(
@@ -2440,7 +2447,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 thread_id="thread-new",
                 stderr="",
             ),
-            delivery_message='{"mode": "recent", "reason": "contextual request for the prior output"}',
+            delivery_message=(
+                '{"mode": "recent", "artifact_indexes": [1], '
+                '"reason": "contextual request for the graph only"}'
+            ),
         )
 
         self.app._handle_update(self.update(123, "보자"))
@@ -2448,6 +2458,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app._execute_task(task)
 
         self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertEqual(len(self.api.documents), 1)
         self.assertEqual(self.api.messages, [(123, "The requested result is attached.")])
         prompt = self.app.runner.delivery_prompts[0][0]
         self.assertIn(report.name, prompt)

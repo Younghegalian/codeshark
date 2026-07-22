@@ -279,6 +279,7 @@ class ProjectRoute:
 @dataclass(frozen=True)
 class DeliveryDecision:
     mode: str = "none"
+    artifact_indexes: tuple[int, ...] = ()
 
 
 def split_message(text: str, limit: int = 3900) -> list[str]:
@@ -2001,13 +2002,18 @@ class AgentApp:
             if resume_tier is not None
             else self._workflow_plan(task, request, triage_runner, project)
         )
+        selected_recent_artifact_paths = tuple(
+            path
+            for index, path in enumerate(recent_artifact_paths, start=1)
+            if index in delivery_decision.artifact_indexes
+        )
         delivery_allowed = (
             task.source != "telegram-group" or group_file_delivery_enabled
         )
         contextual_file_delivery = (
             delivery_allowed
             and delivery_decision.mode == "recent"
-            and bool(recent_artifact_paths)
+            and bool(selected_recent_artifact_paths)
         )
         file_delivery_requested = (
             delivery_decision.mode in {"recent", "result"}
@@ -2178,7 +2184,7 @@ class AgentApp:
             _, plain_paths = extract_plain_file_paths(clean_message)
         known_paths = tuple(
             dict.fromkeys(
-                (*marked_paths, *linked_paths, *plain_paths, *recent_artifact_paths)
+                (*marked_paths, *linked_paths, *plain_paths, *selected_recent_artifact_paths)
                 if contextual_file_delivery
                 else (*marked_paths, *linked_paths, *plain_paths)
             )
@@ -2961,14 +2967,21 @@ class AgentApp:
             approved=False,
             full_access=False,
         )
-        mode = self._parse_delivery_decision(decision.message) if self._run_succeeded(decision) else None
-        if mode is not None:
-            return DeliveryDecision(mode)
+        parsed = (
+            self._parse_delivery_decision(decision.message, len(recent_artifact_paths))
+            if self._run_succeeded(decision)
+            else None
+        )
+        if parsed is not None:
+            return parsed
         LOGGER.warning("delivery assessment did not return a valid decision; skipping attachment")
         return DeliveryDecision()
 
     @staticmethod
-    def _parse_delivery_decision(message: str) -> str | None:
+    def _parse_delivery_decision(
+        message: str,
+        candidate_count: int,
+    ) -> DeliveryDecision | None:
         candidates = [message.strip()]
         candidates.extend(line.strip() for line in message.splitlines() if line.strip())
         for candidate in candidates:
@@ -2979,8 +2992,19 @@ class AgentApp:
             if not isinstance(decision, dict):
                 continue
             mode = decision.get("mode")
-            if mode in {"none", "recent", "result"}:
-                return mode
+            if mode in {"none", "result"}:
+                return DeliveryDecision(mode)
+            indexes = decision.get("artifact_indexes")
+            if mode != "recent" or not isinstance(indexes, list) or not indexes:
+                continue
+            if any(
+                not isinstance(index, int)
+                or isinstance(index, bool)
+                or not 1 <= index <= candidate_count
+                for index in indexes
+            ):
+                continue
+            return DeliveryDecision("recent", tuple(dict.fromkeys(indexes))[:_MAX_DELIVERY_FILES])
         return None
 
     def _delivery_context(
@@ -2996,7 +3020,10 @@ class AgentApp:
         ]
         if recent_artifact_paths:
             lines.append("Recent completed files not yet necessarily delivered:")
-            lines.extend(f"- {Path(path).name}" for path in recent_artifact_paths)
+            lines.extend(
+                f"[{index}] {Path(path).name}"
+                for index, path in enumerate(recent_artifact_paths, start=1)
+            )
         else:
             lines.append("Recent completed files: none")
         if task.source == "telegram-group":
@@ -3018,8 +3045,10 @@ class AgentApp:
                 "file and attach it in the final response. A terse continuation such as '보자', '그거 줘', or '다시 보내' should be recent ",
                 "when the context establishes relevant recent completed files. Do not choose recent merely because files exist, and do not ",
                 "choose result for a plain explanation, status check, or ordinary edit that did not ask for a file. The gateway, not you, ",
-                "performs any attachment after validating server-controlled paths.",
-                "Return only one JSON object with this exact shape: {\"mode\": \"none|recent|result\", \"reason\": \"brief\"}.",
+                "performs any attachment after validating server-controlled paths. For recent, choose only the exact numbered candidates ",
+                "the user needs; do not include supporting CSV, README, source, or older files unless the user asks for them. For none or ",
+                "result, use an empty artifact_indexes array.",
+                "Return only one JSON object with this exact shape: {\"mode\": \"none|recent|result\", \"artifact_indexes\": [1], \"reason\": \"brief\"}.",
                 "",
                 "[Delivery context]",
                 context,
