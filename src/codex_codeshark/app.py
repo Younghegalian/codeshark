@@ -628,13 +628,15 @@ class AgentApp:
             def orchestration_route(tier: str) -> list[str]:
                 profile = profiles.get(tier.replace("-", "_"))
                 if profile is None:
-                    return ["Primary"]
-                stages: list[str] = []
+                    return ["Triage", "Primary execution"]
+                stages: list[str] = ["Triage"]
                 if profile.uses_preflight:
-                    stages.append("Plan")
+                    stages.append("Planning")
                 if profile.uses_research:
                     stages.append("Research")
-                stages.append("Primary")
+                stages.append(
+                    "Primary execution" if profile.uses_validator else "Direct execution"
+                )
                 if profile.uses_validator:
                     stages.append("Independent review")
                 if profile.feedback_iterations:
@@ -719,9 +721,10 @@ class AgentApp:
                         },
                         "model_assignments": [
                             assignment(
-                                "Routine",
+                                "Direct execution",
                                 self.config.routine_model,
                                 self.config.routine_reasoning_effort,
+                                usage_role="Routine",
                             ),
                             assignment(
                                 "Triage",
@@ -729,7 +732,7 @@ class AgentApp:
                                 self.config.triage_reasoning_effort,
                             ),
                             assignment(
-                                "Planner",
+                                "Planning",
                                 self.config.preflight_model,
                                 self.config.preflight_reasoning_effort,
                                 usage_role="Preflight",
@@ -740,9 +743,10 @@ class AgentApp:
                                 self.config.research_reasoning_effort,
                             ),
                             assignment(
-                                "Primary",
+                                "Primary execution",
                                 self.config.primary_model,
                                 self.config.primary_reasoning_effort,
+                                usage_role="Primary",
                             ),
                             assignment(
                                 "Rework",
@@ -750,12 +754,13 @@ class AgentApp:
                                 self.config.rework_reasoning_effort,
                             ),
                             assignment(
-                                "Validation",
+                                "Independent review",
                                 self.config.validator_model,
                                 self.config.validator_reasoning_effort,
+                                usage_role="Validation",
                             ),
                             assignment(
-                                "Adversarial Review",
+                                "Adversarial review",
                                 self.config.feedback_model,
                                 self.config.feedback_reasoning_effort,
                                 usage_role="Feedback",

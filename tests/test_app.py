@@ -891,14 +891,15 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(payload["security"]["groups"], [])
         self.assertEqual(payload["model_assignments"][4]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][0]["role"], "Direct execution")
         self.assertEqual(payload["model_assignments"][1]["role"], "Triage")
-        self.assertEqual(payload["model_assignments"][2]["role"], "Planner")
-        self.assertEqual(payload["model_assignments"][4]["role"], "Primary")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Planning")
+        self.assertEqual(payload["model_assignments"][4]["role"], "Primary execution")
         self.assertEqual(payload["model_assignments"][4]["reasoning_effort"], "high")
         self.assertEqual(payload["model_assignments"][4]["recent_total_tokens"], 0)
         self.assertEqual(payload["model_assignments"][5]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Validation")
-        self.assertEqual(payload["model_assignments"][7]["role"], "Adversarial Review")
+        self.assertEqual(payload["model_assignments"][6]["role"], "Independent review")
+        self.assertEqual(payload["model_assignments"][7]["role"], "Adversarial review")
         self.assertEqual(payload["model_assignments"][8]["role"], "Finalization")
         self.assertEqual(
             tuple(payload["orchestration"]),
@@ -911,7 +912,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["active_tasks"][0]["orchestration_tier"], "standard")
         self.assertEqual(
             payload["active_tasks"][0]["orchestration_route"],
-            ["Primary", "Independent review", "Finalize"],
+            ["Triage", "Primary execution", "Independent review", "Finalize"],
         )
         self.assertEqual(payload["active_tasks"][0]["completed_stages"], ["primary"])
         self.assertGreaterEqual(payload["active_tasks"][0]["elapsed_seconds"], 70)
