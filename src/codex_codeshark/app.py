@@ -119,9 +119,9 @@ The paired administrator keeps the same session, capabilities, and approval flow
 chat. Other members receive an ephemeral, MCP-disabled agent that can research on the network and
 inspect, create, or modify files only in the isolated group sandbox. It cannot access administrator
 data, projects, credentials, or configured roots, and it cannot perform destructive, privileged, or
-external state-changing work. The 12 most recent Codeshark exchanges addressed in this group are
-kept for up to 30 days as shared group context. They are never shared with private chats, other
-groups, or personal-data migration."""
+external state-changing work. The 12 most recent group messages and Codeshark exchanges that
+Telegram delivers from this group are kept for up to 30 days as shared group context. They are
+never shared with private chats, other groups, or personal-data migration."""
 
 
 _FILE_DELIVERY_MARKER = re.compile(
@@ -1482,6 +1482,7 @@ class AgentApp:
             return
         request = self._extract_group_request(message, chat_id)
         if request is None:
+            self.store.append_group_context(chat_id, user_id, text)
             return
         if not request:
             self._send_message(
@@ -3711,7 +3712,9 @@ class AgentApp:
         blocks: list[str] = []
         used_chars = 0
         for request, response in reversed(context):
-            block = f"Group member request: {request}\nCodeshark: {response}"
+            block = f"Group message: {request}"
+            if response:
+                block += f"\nCodeshark: {response}"
             if used_chars + len(block) > 6000:
                 break
             blocks.append(block)

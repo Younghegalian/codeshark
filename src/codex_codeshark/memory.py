@@ -458,7 +458,9 @@ def compose_restricted_group_prompt(
     context_lines: list[str] = []
     used_chars = 0
     for request, response in reversed(context or []):
-        block = f"Group member request: {request}\nCodeshark: {response}"
+        block = f"Group message: {request}"
+        if response:
+            block += f"\nCodeshark: {response}"
         if used_chars + len(block) > 6000:
             break
         context_lines.append(block)

@@ -739,6 +739,30 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("My topic is Python", other_prompt)
         self.assertIn("Recent Codeshark conversation in this group", other_prompt)
 
+    def test_visible_unaddressed_group_messages_join_shared_context_without_queuing(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        runner = FakeCodexRunner()
+        self.app.runner = runner
+
+        self.app._handle_update(
+            self.update(456, "The project codename is Aurora", "group", chat_id=group_id)
+        )
+        self.assertEqual(self.app.store.pending_count(), 0)
+
+        self.app._handle_update(
+            self.update(
+                789,
+                "@Codex_codeshark_bot What is the project codename?",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn("The project codename is Aurora", runner.prompts[0][0])
+
     def test_natural_file_request_attaches_latest_completed_result_without_runner(self) -> None:
         report = self.config.workdir / "completed-result.pdf"
         report.write_bytes(b"%PDF-safe-result")

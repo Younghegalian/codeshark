@@ -1642,13 +1642,13 @@ class AgentStore:
         chat_id: int,
         user_id: int,
         request: str,
-        response: str,
+        response: str = "",
         *,
         now: float | None = None,
     ) -> None:
         normalized_request = request.strip()[:2000]
         normalized_response = response.strip()[:4000]
-        if not normalized_request or not normalized_response:
+        if not normalized_request:
             return
         created_at = time.time() if now is None else now
         with self._lock, self._connect() as connection:
