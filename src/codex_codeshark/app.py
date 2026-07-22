@@ -398,6 +398,15 @@ class AgentApp:
             )
             for worker_index in range(config.worker_count)
         )
+        self._project_router_runners = tuple(
+            self._build_runner(
+                worker_index,
+                model=self.config.router_model,
+                reasoning_effort=self.config.router_reasoning_effort,
+                role="Project Router",
+            )
+            for worker_index in range(config.worker_count)
+        )
         self._triage_runners = tuple(
             self._build_runner(
                 worker_index,
@@ -732,6 +741,11 @@ class AgentApp:
                                 self.config.routine_model,
                                 self.config.routine_reasoning_effort,
                                 usage_role="Routine",
+                            ),
+                            assignment(
+                                "Project Router",
+                                self.config.router_model,
+                                self.config.router_reasoning_effort,
                             ),
                             assignment(
                                 "Triage",
@@ -1114,6 +1128,7 @@ class AgentApp:
             rework_runner,
             subagent_runner,
             feedback_runner,
+            project_router_runner,
             triage_runner,
             preflight_runner,
             research_runner,
@@ -1125,6 +1140,7 @@ class AgentApp:
                 self._rework_runners,
                 self._subagent_runners,
                 self._feedback_runners,
+                self._project_router_runners,
                 self._triage_runners,
                 self._preflight_runners,
                 self._research_runners,
@@ -1141,6 +1157,7 @@ class AgentApp:
                     rework_runner,
                     subagent_runner,
                     feedback_runner,
+                    project_router_runner,
                     triage_runner,
                     preflight_runner,
                     research_runner,
@@ -1690,6 +1707,7 @@ class AgentApp:
         rework_runner: CodexRunner,
         subagent_runner: CodexRunner,
         feedback_runner: CodexRunner,
+        project_router_runner: CodexRunner,
         triage_runner: CodexRunner,
         preflight_runner: CodexRunner,
         research_runner: CodexRunner,
@@ -1725,6 +1743,7 @@ class AgentApp:
                     subagent_runner,
                     preflight_runner,
                     triage_runner=triage_runner,
+                    project_router_runner=project_router_runner,
                     primary_runner=primary_runner,
                     rework_runner=rework_runner,
                     feedback_runner=feedback_runner,
@@ -1773,6 +1792,7 @@ class AgentApp:
         preflight_runner: CodexRunner | None = None,
         triage_runner: CodexRunner | None = None,
         *,
+        project_router_runner: CodexRunner | None = None,
         primary_runner: CodexRunner | None = None,
         rework_runner: CodexRunner | None = None,
         feedback_runner: CodexRunner | None = None,
@@ -1783,6 +1803,7 @@ class AgentApp:
         subagent_runner = subagent_runner or runner
         preflight_runner = preflight_runner or subagent_runner
         triage_runner = triage_runner or preflight_runner
+        project_router_runner = project_router_runner or triage_runner
         primary_runner = primary_runner or runner
         rework_runner = rework_runner or primary_runner
         feedback_runner = feedback_runner or subagent_runner
@@ -1796,7 +1817,7 @@ class AgentApp:
             selected_project = self._route_project_for_task(
                 task,
                 request,
-                triage_runner,
+                project_router_runner,
                 project,
             )
             if selected_project != project:

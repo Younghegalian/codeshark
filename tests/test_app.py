@@ -891,17 +891,18 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             self.config.group_respond_to_mentions,
         )
         self.assertEqual(payload["security"]["groups"], [])
-        self.assertEqual(payload["model_assignments"][4]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["model_assignments"][0]["role"], "Direct execution")
-        self.assertEqual(payload["model_assignments"][1]["role"], "Triage")
-        self.assertEqual(payload["model_assignments"][2]["role"], "Planning")
-        self.assertEqual(payload["model_assignments"][4]["role"], "Primary execution")
-        self.assertEqual(payload["model_assignments"][4]["reasoning_effort"], "high")
-        self.assertEqual(payload["model_assignments"][4]["recent_total_tokens"], 0)
-        self.assertEqual(payload["model_assignments"][5]["role"], "Rework")
-        self.assertEqual(payload["model_assignments"][6]["role"], "Independent review")
-        self.assertEqual(payload["model_assignments"][7]["role"], "Adversarial review")
-        self.assertEqual(payload["model_assignments"][8]["role"], "Finalization")
+        self.assertEqual(payload["model_assignments"][1]["role"], "Project Router")
+        self.assertEqual(payload["model_assignments"][2]["role"], "Triage")
+        self.assertEqual(payload["model_assignments"][3]["role"], "Planning")
+        self.assertEqual(payload["model_assignments"][5]["model"], "gpt-5.6-sol")
+        self.assertEqual(payload["model_assignments"][5]["role"], "Primary execution")
+        self.assertEqual(payload["model_assignments"][5]["reasoning_effort"], "high")
+        self.assertEqual(payload["model_assignments"][5]["recent_total_tokens"], 0)
+        self.assertEqual(payload["model_assignments"][6]["role"], "Rework")
+        self.assertEqual(payload["model_assignments"][7]["role"], "Independent review")
+        self.assertEqual(payload["model_assignments"][8]["role"], "Adversarial review")
+        self.assertEqual(payload["model_assignments"][9]["role"], "Finalization")
         self.assertEqual(
             tuple(payload["orchestration"]),
             ("quick", "routine", "standard", "deep", "high_assurance"),
@@ -1258,6 +1259,35 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIsNotNone(manifest)
         self.assertEqual(manifest.project, "FETM")
 
+    def test_project_router_uses_its_dedicated_runner(self) -> None:
+        (self.config.workdir / "FETM").mkdir()
+        router_runner = FakeCodexRunner(
+            project_triage_message='{"decision": "existing", "project": "FETM", "confidence": "high"}'
+        )
+        triage_runner = FakeCodexRunner(
+            triage_message='{"tier": "routine", "confidence": "high", "reason": "test"}'
+        )
+        primary_runner = FakeCodexRunner()
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: General]]\nAnalyze the gas transport measurements.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(
+            task,
+            runner=primary_runner,
+            triage_runner=triage_runner,
+            project_router_runner=router_runner,
+        )
+
+        self.assertEqual(len(router_runner.project_triage_prompts), 1)
+        self.assertEqual(triage_runner.project_triage_prompts, [])
+        self.assertEqual(len(triage_runner.triage_prompts), 1)
+        self.assertIn("Project: FETM", primary_runner.prompts[0][0])
+
     def test_project_router_can_create_a_new_workspace_project(self) -> None:
         runner = FakeCodexRunner(
             project_triage_message='{"decision": "new", "project": "Catalyst study", "confidence": "high"}'
@@ -1593,6 +1623,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(self.app._rework_runners), self.config.worker_count)
         self.assertEqual(len(self.app._subagent_runners), self.config.worker_count)
         self.assertEqual(len(self.app._feedback_runners), self.config.worker_count)
+        self.assertEqual(len(self.app._project_router_runners), self.config.worker_count)
         self.assertEqual(len(self.app._triage_runners), self.config.worker_count)
         self.assertEqual(len(self.app._preflight_runners), self.config.worker_count)
         self.assertEqual(len(self.app._research_runners), self.config.worker_count)
@@ -1634,6 +1665,13 @@ class AgentAppAuthorizationTests(unittest.TestCase):
                 runner.model == self.config.feedback_model
                 and runner.model_reasoning_effort == self.config.feedback_reasoning_effort
                 for runner in self.app._feedback_runners
+            )
+        )
+        self.assertTrue(
+            all(
+                runner.model == self.config.router_model
+                and runner.model_reasoning_effort == self.config.router_reasoning_effort
+                for runner in self.app._project_router_runners
             )
         )
         self.assertTrue(

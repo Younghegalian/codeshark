@@ -213,6 +213,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.primary_model, "gpt-5.6-sol")
             self.assertEqual(updated.validator_model, "gpt-5.6-luna")
             self.assertEqual(updated.feedback_model, "gpt-5.6-terra")
+            self.assertEqual(updated.router_model, "gpt-5.6-luna")
             self.assertEqual(updated.triage_model, "gpt-5.6-luna")
             self.assertEqual(updated.preflight_model, "gpt-5.6-terra")
             text = config_path.read_text(encoding="utf-8")
@@ -252,6 +253,8 @@ class ConfigTests(unittest.TestCase):
                 validator_reasoning_effort="max",
                 feedback_model="gpt-5.4-mini",
                 feedback_reasoning_effort="high",
+                router_model="gpt-5.4-mini",
+                router_reasoning_effort="medium",
                 triage_model="gpt-5.4-nano",
                 triage_reasoning_effort="low",
                 preflight_model="gpt-5.5",
@@ -264,6 +267,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(updated.rework_reasoning_effort, "xhigh")
             self.assertEqual(updated.feedback_model, "gpt-5.4-mini")
             self.assertEqual(updated.feedback_reasoning_effort, "high")
+            self.assertEqual(updated.router_model, "gpt-5.4-mini")
+            self.assertEqual(updated.router_reasoning_effort, "medium")
             self.assertEqual(updated.triage_model, "gpt-5.4-nano")
             self.assertEqual(updated.triage_reasoning_effort, "low")
 
@@ -385,6 +390,8 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(loaded.validator_reasoning_effort, "high")
             self.assertEqual(loaded.feedback_model, "gpt-5.6-terra")
             self.assertEqual(loaded.feedback_reasoning_effort, "high")
+            self.assertEqual(loaded.router_model, "gpt-5.6-luna")
+            self.assertEqual(loaded.router_reasoning_effort, "medium")
             self.assertEqual(loaded.triage_model, "gpt-5.6-luna")
             self.assertEqual(loaded.triage_reasoning_effort, "medium")
             self.assertEqual(loaded.preflight_model, "gpt-5.6-luna")
