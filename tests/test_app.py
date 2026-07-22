@@ -1296,7 +1296,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         task = self.app.store.enqueue_task(
             123,
-            "[[CODESHARK_PROJECT: General]]\nStart a new catalyst durability study.",
+            "[[CODESHARK_PROJECT: General]]\nStart a new catalyst durability project.",
             source="telegram",
             ephemeral=False,
             approved=True,
@@ -1306,6 +1306,54 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue((self.config.workdir / "Catalyst study").is_dir())
         self.assertEqual(self.app.state.active_project(123), "Catalyst study")
         self.assertIn("Project: Catalyst study", runner.prompts[0][0])
+
+    def test_project_router_rejects_an_unrequested_new_project(self) -> None:
+        (self.config.workdir / "FETM").mkdir()
+        self.app.state.set_active_project(123, "FETM")
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "new", "project": "Catalyst study", "confidence": "high"}'
+        )
+        self.app.runner = runner
+        task = self.app.store.enqueue_task(
+            123,
+            "[[CODESHARK_PROJECT: FETM]]\nAnalyze the next gas transport dataset.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(task)
+
+        self.assertFalse((self.config.workdir / "Catalyst study").exists())
+        self.assertEqual(self.app.state.active_project(123), "FETM")
+        self.assertIn("Project: FETM", runner.prompts[0][0])
+
+    def test_project_router_receives_existing_project_memory_cues(self) -> None:
+        (self.config.workdir / "gnw_transport_paper").mkdir()
+        self.app.memory.upsert(
+            "Figure revision status",
+            "Figure 8 marker colors must match the SEM panels.",
+            scope="gnw_transport_paper",
+        )
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "existing", "project": "gnw_transport_paper", "confidence": "high"}'
+        )
+        self.app.runner = runner
+        task = self.app.store.enqueue_task(
+            123,
+            "Continue the marker-color revision from the previous transport paper work.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(task)
+
+        self.assertIn(
+            "Known project gnw_transport_paper: memory: Figure revision status",
+            runner.project_triage_prompts[0][0],
+        )
+        self.assertEqual(self.app.state.active_project(123), "gnw_transport_paper")
 
     def test_project_router_can_leave_a_stale_active_project_for_projectless_work(self) -> None:
         (self.config.workdir / "FETM").mkdir()
@@ -1329,7 +1377,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.app.runner = runner
         task = self.app.store.enqueue_task(
             0,
-            "[[CODESHARK_PROJECT: General]]\nStart a new local dataset study.",
+            "[[CODESHARK_PROJECT: General]]\nStart a new local dataset project.",
             source=LOCAL_CONSOLE_SOURCE,
             ephemeral=False,
             approved=True,
@@ -2087,12 +2135,12 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(manuscript.feedback_iterations, 2)
         self.assertTrue(manuscript.uses_adversarial_review)
 
-    def test_invalid_triage_response_falls_back_to_standard(self) -> None:
+    def test_invalid_triage_response_falls_back_to_quick(self) -> None:
         task = self.app.store.enqueue_task(123, "ambiguous request", source="test", ephemeral=False)
         plan = self.app._workflow_plan(task, "ambiguous request", FakeCodexRunner(triage_message="not JSON"))
 
-        self.assertEqual(plan.tier, "standard")
-        self.assertTrue(plan.uses_validator)
+        self.assertEqual(plan.tier, "quick")
+        self.assertFalse(plan.uses_validator)
 
     def test_triage_receives_active_project_memory_without_replaying_the_session(self) -> None:
         project = "gnw_transport_paper"
