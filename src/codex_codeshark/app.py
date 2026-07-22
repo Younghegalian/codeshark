@@ -2147,11 +2147,7 @@ class AgentApp:
                 scope=project,
             )
         result = replace(result, message=clean_message)
-        if (
-            not successful
-            and result.startup_retried
-            and not result.turn_started
-        ):
+        if not successful:
             self.store.save_safe_retry_payload(task)
         if (
             successful
@@ -2360,7 +2356,7 @@ class AgentApp:
         local: bool = False,
     ) -> None:
         if persist_session and result.thread_id:
-            if result.timed_out:
+            if result.timed_out or result.exit_code != 0:
                 self.state.set_session_thread_id(chat_id, result.thread_id, project)
                 self.state.mark_session_interrupted(chat_id, project)
             else:
@@ -2485,7 +2481,7 @@ class AgentApp:
         else:
             retry = ""
         attention = (
-            " Attention에서 Retry를 누르면 같은 요청을 새 작업으로 다시 넣을 수 있습니다."
+            " Attention에서 Continue를 누르면 기존 프로젝트 세션과 작업 파일을 확인한 뒤 이어서 진행합니다."
             if task_id and self.store.has_safe_retry(task_id)
             else ""
         )

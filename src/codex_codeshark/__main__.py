@@ -252,7 +252,7 @@ def main() -> int:
                 raise ValueError("the task queue is full")
             task = store.retry_failed_task(args.task_id)
             if task is None:
-                raise ValueError("this task is no longer eligible for a safe retry")
+                raise ValueError("this task is no longer eligible for retry")
             print(json.dumps({"task_id": task.id}, ensure_ascii=False))
             return 0
         if args.command in {"start", "stop", "restart", "service-status"}:

@@ -60,9 +60,40 @@ class AgentStoreTests(unittest.TestCase):
 
             self.assertIsNotNone(retry)
             self.assertNotEqual(retry.id, running.id)
-            self.assertEqual(retry.prompt, "original request")
+            self.assertTrue(retry.prompt.startswith("original request"))
+            self.assertIn("[Retry continuation]", retry.prompt)
             self.assertEqual(retry.status, "queued")
             self.assertFalse(store.has_safe_retry(running.id))
+
+    def test_model_capacity_failure_can_continue_from_its_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = AgentStore(Path(directory) / "agent.db")
+            task = store.enqueue_task(123, "original request", source="telegram", ephemeral=False)
+            running = store.claim_next_task(now=task.created_at + 1)
+            store.upsert_task_manifest(
+                running.id,
+                project="paper-revision",
+                tier="deep",
+                phase="needs-follow-up",
+            )
+            self.assertTrue(
+                store.finish_task(
+                    running.id,
+                    "failed",
+                    "Selected model is at capacity. Please try a different model.",
+                )
+            )
+
+            failure = store.latest_failure()
+            self.assertIsNotNone(failure)
+            self.assertTrue(failure.retry_available)
+
+            retry = store.retry_failed_task(running.id)
+
+            self.assertIsNotNone(retry)
+            self.assertIn("[[CODESHARK_PROJECT: paper-revision]]", retry.prompt)
+            self.assertIn("[Capacity continuation]", retry.prompt)
+            self.assertEqual(retry.status, "queued")
 
     def test_summarizes_model_runs_in_a_requested_time_window(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

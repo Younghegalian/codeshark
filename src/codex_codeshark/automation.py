@@ -23,6 +23,10 @@ TASK_STATUSES = {
     "rejected",
 }
 SCHEDULE_STATUSES = {"awaiting_approval", "enabled", "paused", "completed", "rejected"}
+_MODEL_CAPACITY_ERROR = re.compile(
+    r"(?:selected\s+model\s+is\s+at\s+capacity|model\s+.*\s+at\s+capacity)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -1217,12 +1221,14 @@ class AgentStore:
             ).fetchone()
         if row is None:
             return None
-        message = " ".join(str(row["error"]).split())[:180]
+        diagnostic = str(row["error"] or "")
+        capacity_continuation = bool(_MODEL_CAPACITY_ERROR.search(diagnostic))
+        message = " ".join(diagnostic.split())[:180]
         return TaskFailure(
             task_id=row["id"],
             message=message or "Task failed without a diagnostic message.",
             finished_at=row["finished_at"],
-            retry_available=bool(row["retry_available"]),
+            retry_available=bool(row["retry_available"]) or capacity_continuation,
         )
 
     def record_artifact_receipt(
@@ -1406,7 +1412,7 @@ class AgentStore:
         *,
         expires_seconds: int = 24 * 60 * 60,
     ) -> bool:
-        """Keep one short-lived copy only for a turn that never started."""
+        """Keep one short-lived copy for a user-invoked continuation."""
         if task.restricted or task.ephemeral or not task.prompt:
             return False
         with self._lock, self._connect() as connection:
@@ -1434,7 +1440,7 @@ class AgentStore:
         return row is not None
 
     def retry_failed_task(self, task_id: str) -> TaskRecord | None:
-        """Queue a fresh task from a locally saved, pre-turn failure payload."""
+        """Queue a saved retry or a project-scoped continuation after model capacity fails."""
         with self._lock, self._connect() as connection:
             task = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if task is None or task["status"] != "failed" or task["restricted"] or task["ephemeral"]:
@@ -1443,7 +1449,31 @@ class AgentStore:
                 "SELECT prompt FROM task_retry_payloads WHERE task_id = ? AND expires_at >= ?",
                 (task_id, time.time()),
             ).fetchone()
-            if payload is None:
+            prompt = str(payload["prompt"]) if payload is not None else ""
+            if prompt:
+                prompt += (
+                    "\n\n[Retry continuation]\n"
+                    "Resume the interrupted task from its existing project session and workspace if available. "
+                    "Inspect actual files, recent artifacts, and completed changes before acting. Do not repeat "
+                    "completed work or external side effects; finish the original requested outcome.\n"
+                    "[/Retry continuation]"
+                )
+            if not prompt and _MODEL_CAPACITY_ERROR.search(str(task["error"] or "")):
+                manifest = connection.execute(
+                    "SELECT project FROM task_manifests WHERE task_id = ?",
+                    (task_id,),
+                ).fetchone()
+                if manifest is not None and str(manifest["project"]).strip():
+                    project = " ".join(str(manifest["project"]).split())[:80]
+                    prompt = (
+                        f"[[CODESHARK_PROJECT: {project}]]\n"
+                        "[Capacity continuation]\n"
+                        "Continue the interrupted task from this project's existing Codex session and workspace. "
+                        "Inspect actual files, recent artifacts, and completed changes before acting. Do not repeat "
+                        "completed work or external side effects; finish the original requested outcome.\n"
+                        "[/Capacity continuation]"
+                    )
+            if not prompt:
                 return None
             retry_id = "t" + uuid.uuid4().hex[:10]
             now = time.time()
@@ -1457,7 +1487,7 @@ class AgentStore:
                 (
                     retry_id,
                     task["chat_id"],
-                    payload["prompt"],
+                    prompt,
                     task["source"],
                     task["ephemeral"],
                     now,

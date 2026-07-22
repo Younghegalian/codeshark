@@ -1739,7 +1739,7 @@ struct AttentionView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(3)
                                 HStack(spacing: 8) {
-                                    Button("Retry") {
+                                    Button("Continue") {
                                         retryTask(failure.taskID)
                                     }
                                     .buttonStyle(.borderedProminent)
@@ -1752,8 +1752,8 @@ struct AttentionView: View {
                                 }
                                 Text(
                                     failure.retryAvailable == true
-                                        ? "Retry is available because the failed turn never started."
-                                        : "Retry is unavailable after a turn starts, to avoid duplicate work."
+                                        ? "Continue checks the existing project session and workspace before resuming."
+                                        : "This failed task has no recoverable request context."
                                 )
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -2327,7 +2327,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         if let failure = snapshot.lastFailure {
             menu.addItem(.separator())
             addSection("Last Task", to: menu)
-            addSecondary(failure.message, to: menu)
+            addSecondary(compactMenuText(failure.message), to: menu)
         }
 
         menu.addItem(actionItem("Open Codeshark", action: #selector(openLocalConsole(_:))))
@@ -2374,6 +2374,12 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             ]
         )
         target.addItem(item)
+    }
+
+    private func compactMenuText(_ title: String, limit: Int = 48) -> String {
+        let compact = title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard compact.count > limit else { return compact }
+        return String(compact.prefix(max(1, limit - 1))) + "…"
     }
 
     private func actionItem(_ title: String, action: Selector) -> NSMenuItem {

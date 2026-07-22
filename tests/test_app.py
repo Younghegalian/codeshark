@@ -2157,9 +2157,49 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         message = self.api.messages[-1][1]
         self.assertIn("HTTP 451", message)
-        self.assertIn("Attention에서 Retry", message)
+        self.assertIn("Attention에서 Continue", message)
         self.assertIn(task.id, message)
         self.assertNotIn("secret detail", message)
+
+    def test_model_capacity_failure_preserves_session_for_attention_continue(self) -> None:
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=1,
+                message="",
+                thread_id="capacity-thread",
+                stderr="Selected model is at capacity. Please try a different model.",
+                turn_started=True,
+            )
+        )
+        self.app._handle_update(self.update(123, "do work"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        session = self.app.state.session_snapshot(123, "General")
+        self.assertEqual(session.codex_thread_id, "capacity-thread")
+        self.assertTrue(self.app.state.session_interrupted(123, "General"))
+        self.assertTrue(self.app.store.has_safe_retry(task.id))
+        self.assertIn("Attention에서 Continue", self.api.messages[-1][1])
+
+    def test_started_turn_failure_remains_continuable(self) -> None:
+        self.app.runner = FakeCodexRunner(
+            RunResult(
+                exit_code=1,
+                message="",
+                thread_id="started-thread",
+                stderr="runner exited unexpectedly",
+                turn_started=True,
+            )
+        )
+        self.app._handle_update(self.update(123, "do work"))
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        session = self.app.state.session_snapshot(123, "General")
+        self.assertEqual(session.codex_thread_id, "started-thread")
+        self.assertTrue(self.app.state.session_interrupted(123, "General"))
+        self.assertTrue(self.app.store.has_safe_retry(task.id))
+        self.assertIn("Attention에서 Continue", self.api.messages[-1][1])
 
     def test_task_sends_only_the_final_result(self) -> None:
         self.app.runner = FakeCodexRunner()
