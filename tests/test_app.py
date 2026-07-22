@@ -828,6 +828,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(self.api.messages, [])
 
     def test_menu_status_publishes_safe_dashboard_data(self) -> None:
+        (self.config.workdir / "Registered workspace project").mkdir()
         task = self.app.store.enqueue_task(
             123,
             "[[CODESHARK_PROJECT: Private Project]]\nsecret request text",
@@ -926,6 +927,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["recent_deliveries"][0]["orchestration_tier"], "standard")
         self.assertEqual(payload["projects"][0]["project"], "Private Project")
         self.assertEqual(payload["projects"][0]["active_task_count"], 1)
+        self.assertIn(
+            "Registered workspace project",
+            {item["project"] for item in payload["projects"]},
+        )
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])
         self.assertEqual(payload["last_failure"]["message"], "brief diagnostic")
         self.assertEqual(payload["model_usage_5h"][0]["model"], "gpt-5.6-sol")
@@ -1348,6 +1353,18 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertEqual(self.app.state.active_project(123), "General")
         self.assertIn("Project: General", runner.prompts[0][0])
+
+    def test_startup_resets_stale_active_project_but_keeps_its_session(self) -> None:
+        self.app.state.set_active_project(123, "Stale project")
+        self.app.state.set_session_thread_id(123, "stale-thread", "Stale project")
+
+        refreshed = AgentApp(self.config, self.api)
+
+        self.assertEqual(refreshed.state.active_project(123), "General")
+        self.assertEqual(
+            refreshed.state.session_snapshot(123, "Stale project").codex_thread_id,
+            "stale-thread",
+        )
 
     def test_workspace_directories_are_projects_except_inbox_and_deliverables(self) -> None:
         for name in ("analysis", "outputs", "inbox", "deliverables", ".codeshark"):

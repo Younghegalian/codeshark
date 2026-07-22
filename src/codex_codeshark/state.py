@@ -210,6 +210,19 @@ class StateStore:
             self._write()
         return normalized
 
+    def reset_unavailable_active_projects(self, projects: set[str]) -> tuple[str, ...]:
+        """Return stale active projects to General without deleting their sessions."""
+        available = {normalize_project_name(project) for project in projects}
+        reset: list[str] = []
+        with self._lock:
+            for chat_id, project in self._state.active_projects.items():
+                if project != DEFAULT_PROJECT and project not in available:
+                    self._state.active_projects[chat_id] = DEFAULT_PROJECT
+                    reset.append(chat_id)
+            if reset:
+                self._write()
+        return tuple(reset)
+
     def automatic_file_delivery_enabled(self, chat_id: int) -> bool:
         with self._lock:
             return self._state.automatic_file_delivery.get(str(chat_id), False)

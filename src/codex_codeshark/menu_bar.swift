@@ -1647,7 +1647,7 @@ struct ProjectOverviewView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Projects")
                     .font(.system(size: 16, weight: .semibold))
-                Text("Local overview only. Telegram project sessions remain isolated by conversation.")
+                Text("Workspace folders are registered immediately. Each project keeps a separate Codex session for this conversation after its first task.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }

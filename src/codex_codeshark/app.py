@@ -337,6 +337,14 @@ class AgentApp:
         runtime_dir = config.state_path.parent
         database_path = runtime_dir / "agent.db"
         self.state = StateStore(config.state_path)
+        workspace_projects = discover_workspace_projects(
+            config.workdir,
+            config.delegated_roots,
+            agent_repository_root=config.agent_repository_root,
+        )
+        self.state.reset_unavailable_active_projects(
+            {project.name for project in workspace_projects}
+        )
         self.state.migrate_legacy_session(next(iter(config.allowed_user_ids)))
         self.memory = MemoryStore(
             runtime_dir / "memory.json",
@@ -601,6 +609,13 @@ class AgentApp:
                         "updated_at": 0,
                     },
                 )
+
+            for workspace_project in discover_workspace_projects(
+                self.config.workdir,
+                self.config.delegated_roots,
+                agent_repository_root=self.config.agent_repository_root,
+            ):
+                project_summary(workspace_project.name)
 
             for item in active_summary:
                 project_summary(str(item["project"]))["active_task_count"] = (
