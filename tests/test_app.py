@@ -829,6 +829,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_menu_status_publishes_safe_dashboard_data(self) -> None:
         (self.config.workdir / "Registered workspace project").mkdir()
+        (self.config.workdir / "Private Project").mkdir()
         task = self.app.store.enqueue_task(
             123,
             "[[CODESHARK_PROJECT: Private Project]]\nsecret request text",
@@ -929,6 +930,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertEqual(payload["projects"][0]["active_task_count"], 1)
         self.assertIn(
             "Registered workspace project",
+            {item["project"] for item in payload["projects"]},
+        )
+        self.assertNotIn(
+            "Queued Project",
             {item["project"] for item in payload["projects"]},
         )
         self.assertEqual(payload["recent_artifacts"], ["final-report.pdf"])

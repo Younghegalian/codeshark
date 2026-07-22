@@ -610,11 +610,15 @@ class AgentApp:
                     },
                 )
 
-            for workspace_project in discover_workspace_projects(
+            registered_workspace_projects = discover_workspace_projects(
                 self.config.workdir,
                 self.config.delegated_roots,
                 agent_repository_root=self.config.agent_repository_root,
-            ):
+            )
+            registered_project_names = {
+                workspace_project.name for workspace_project in registered_workspace_projects
+            }
+            for workspace_project in registered_workspace_projects:
                 project_summary(workspace_project.name)
 
             for item in active_summary:
@@ -839,7 +843,11 @@ class AgentApp:
                             for delivery in failed_deliveries
                         ],
                         "projects": sorted(
-                            projects.values(),
+                            (
+                                project
+                                for name, project in projects.items()
+                                if name in registered_project_names
+                            ),
                             key=lambda item: (
                                 -int(item["active_task_count"]),
                                 -int(item["queued_task_count"]),
