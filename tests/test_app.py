@@ -77,6 +77,7 @@ class FakeCodexRunner:
         *,
         ephemeral=False,
         restricted=False,
+        retain_restricted_workspace=False,
         approved=False,
         full_access=False,
     ) -> RunResult:
@@ -789,6 +790,55 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertTrue(task.ephemeral)
         self.assertTrue(task.restricted)
 
+    def test_group_member_can_receive_a_safe_result_file_from_their_sandbox(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        sandbox = self.config.group_workdir / "worker-1"
+        sandbox.mkdir(parents=True, exist_ok=True)
+        report = sandbox / "summary.txt"
+
+        class GroupFileRunner(FakeCodexRunner):
+            def __init__(self) -> None:
+                super().__init__(
+                    RunResult(
+                        exit_code=0,
+                        message=f"Completed. [[CODESHARK_SEND_FILE: {report}]]",
+                        thread_id=None,
+                        stderr="",
+                    )
+                )
+                self.restricted_workdir = sandbox
+                self.cleaned = False
+
+            def run(self, *args, **kwargs) -> RunResult:
+                if not kwargs["retain_restricted_workspace"]:
+                    raise AssertionError("group output must survive until delivery")
+                report.write_text("group-safe output", encoding="utf-8")
+                return super().run(*args, **kwargs)
+
+            def cleanup_restricted_workspace(self) -> None:
+                self.cleaned = True
+                report.unlink()
+
+        runner = GroupFileRunner()
+        self.app.runner = runner
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot write a report and upload the file",
+                "group",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.app._execute_task(task)
+
+        self.assertIn("[Telegram document delivery]", runner.prompts[0][0])
+        self.assertEqual(self.api.documents[0][0], group_id)
+        self.assertEqual(self.api.documents[0][1], report.resolve())
+        self.assertTrue(runner.cleaned)
+        self.assertFalse(report.exists())
+
     def test_group_risky_request_is_denied_without_queuing(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
@@ -884,6 +934,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["security"]["group_workspace_write"], self.config.group_workspace_write
+        )
+        self.assertEqual(
+            payload["security"]["group_file_delivery_enabled"],
+            self.config.group_file_delivery_enabled,
         )
         self.assertEqual(
             payload["security"]["group_member_requests_enabled"],

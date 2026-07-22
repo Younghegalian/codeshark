@@ -137,6 +137,7 @@ class Config:
     group_respond_to_addressed_threads: bool = True
     group_network_access: bool = True
     group_workspace_write: bool = True
+    group_file_delivery_enabled: bool = True
     attachment_max_bytes: int = 10_000_000
     read_only_roots: tuple[Path, ...] = ()
     delegated_roots: tuple[Path, ...] = ()
@@ -393,6 +394,7 @@ def load_config(path: Path | None = None) -> Config:
     )
     group_network_access = _require_bool(data, "group_network_access", True)
     group_workspace_write = _require_bool(data, "group_workspace_write", True)
+    group_file_delivery_enabled = _require_bool(data, "group_file_delivery_enabled", True)
     attachment_max_bytes = _require_int(data, "attachment_max_bytes", 10_000_000)
     if not 1 <= poll_timeout <= 50:
         raise ConfigError("poll_timeout_seconds must be between 1 and 50")
@@ -575,6 +577,7 @@ def load_config(path: Path | None = None) -> Config:
         group_respond_to_addressed_threads=group_respond_to_addressed_threads,
         group_network_access=group_network_access,
         group_workspace_write=group_workspace_write,
+        group_file_delivery_enabled=group_file_delivery_enabled,
         attachment_max_bytes=attachment_max_bytes,
         read_only_roots=tuple(read_only_roots),
         delegated_roots=tuple(delegated_roots),
@@ -726,6 +729,7 @@ def set_security_settings(
     group_respond_to_addressed_threads: bool,
     group_network_access: bool,
     group_workspace_write: bool,
+    group_file_delivery_enabled: bool,
     config_path: Path | None = None,
 ) -> Config:
     """Persist the administrator and non-administrator group permission switches."""
@@ -744,6 +748,7 @@ def set_security_settings(
         group_respond_to_addressed_threads,
         group_network_access,
         group_workspace_write,
+        group_file_delivery_enabled,
     )
     if any(not isinstance(value, bool) for value in values):
         raise ConfigError("security settings must be true or false")
@@ -768,6 +773,7 @@ def set_security_settings(
         "group_respond_to_addressed_threads": group_respond_to_addressed_threads,
         "group_network_access": group_network_access,
         "group_workspace_write": group_workspace_write,
+        "group_file_delivery_enabled": group_file_delivery_enabled,
     }
     missing_settings: list[str] = []
     for setting, value in assignments.items():
@@ -1280,6 +1286,7 @@ def write_local_config(
             "group_respond_to_addressed_threads = true",
             "group_network_access = true",
             "group_workspace_write = true",
+            "group_file_delivery_enabled = true",
             "attachment_max_bytes = 10000000",
             "read_only_roots = []",
             "delegated_roots = []",

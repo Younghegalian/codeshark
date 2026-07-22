@@ -575,6 +575,7 @@ class CodexRunner:
         *,
         ephemeral: bool = False,
         restricted: bool = False,
+        retain_restricted_workspace: bool = False,
         approved: bool = False,
         full_access: bool = False,
     ) -> RunResult:
@@ -606,6 +607,7 @@ class CodexRunner:
             thread_id,
             ephemeral=ephemeral,
             restricted=restricted,
+            retain_restricted_workspace=retain_restricted_workspace,
             approved=approved,
             full_access=full_access,
         )
@@ -617,6 +619,7 @@ class CodexRunner:
             retry_thread_id,
             ephemeral=ephemeral,
             restricted=restricted,
+            retain_restricted_workspace=retain_restricted_workspace,
             approved=approved,
             full_access=full_access,
         )
@@ -660,6 +663,7 @@ class CodexRunner:
         *,
         ephemeral: bool = False,
         restricted: bool = False,
+        retain_restricted_workspace: bool = False,
         approved: bool = False,
         full_access: bool = False,
     ) -> RunResult:
@@ -699,7 +703,8 @@ class CodexRunner:
                 self._process = None
             if restricted:
                 self._cleanup_restricted_home()
-                self._cleanup_restricted_workspace()
+                if not retain_restricted_workspace:
+                    self._cleanup_restricted_workspace()
 
         message, returned_thread_id = parse_codex_events(stdout)
         return RunResult(
@@ -710,6 +715,10 @@ class CodexRunner:
             cancelled=cancelled,
             timed_out=timed_out,
         )
+
+    def cleanup_restricted_workspace(self) -> None:
+        """Clear a temporarily retained group sandbox after result delivery."""
+        self._cleanup_restricted_workspace()
 
     def _run_app_server(
         self,

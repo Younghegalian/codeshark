@@ -155,6 +155,7 @@ struct DashboardSecurity: Decodable {
     let groupRespondToAddressedThreads: Bool
     let groupNetworkAccess: Bool
     let groupWorkspaceWrite: Bool
+    let groupFileDeliveryEnabled: Bool
     let telegram: String
     let groups: [DashboardSecurityGroup]
 
@@ -174,6 +175,7 @@ struct DashboardSecurity: Decodable {
         case groupRespondToAddressedThreads = "group_respond_to_addressed_threads"
         case groupNetworkAccess = "group_network_access"
         case groupWorkspaceWrite = "group_workspace_write"
+        case groupFileDeliveryEnabled = "group_file_delivery_enabled"
     }
 
     init(
@@ -192,6 +194,7 @@ struct DashboardSecurity: Decodable {
         groupRespondToAddressedThreads: Bool,
         groupNetworkAccess: Bool,
         groupWorkspaceWrite: Bool,
+        groupFileDeliveryEnabled: Bool,
         telegram: String,
         groups: [DashboardSecurityGroup]
     ) {
@@ -210,6 +213,7 @@ struct DashboardSecurity: Decodable {
         self.groupRespondToAddressedThreads = groupRespondToAddressedThreads
         self.groupNetworkAccess = groupNetworkAccess
         self.groupWorkspaceWrite = groupWorkspaceWrite
+        self.groupFileDeliveryEnabled = groupFileDeliveryEnabled
         self.telegram = telegram
         self.groups = groups
     }
@@ -231,6 +235,7 @@ struct DashboardSecurity: Decodable {
         groupRespondToAddressedThreads = try container.decodeIfPresent(Bool.self, forKey: .groupRespondToAddressedThreads) ?? true
         groupNetworkAccess = try container.decodeIfPresent(Bool.self, forKey: .groupNetworkAccess) ?? true
         groupWorkspaceWrite = try container.decodeIfPresent(Bool.self, forKey: .groupWorkspaceWrite) ?? true
+        groupFileDeliveryEnabled = try container.decodeIfPresent(Bool.self, forKey: .groupFileDeliveryEnabled) ?? true
         telegram = try container.decodeIfPresent(String.self, forKey: .telegram) ?? "Keychain credential"
         groups = try container.decodeIfPresent([DashboardSecurityGroup].self, forKey: .groups) ?? []
     }
@@ -2252,6 +2257,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var securityGroupAddressedThreads: NSButton?
     private var securityGroupNetwork: NSButton?
     private var securityGroupWorkspaceWrite: NSButton?
+    private var securityGroupFileDelivery: NSButton?
     private var modelPickers: [String: NSPopUpButton] = [:]
     private var reasoningPickers: [String: NSPopUpButton] = [:]
     private var orchestrationPreflight: [String: NSButton] = [:]
@@ -2546,6 +2552,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             groupRespondToAddressedThreads: true,
             groupNetworkAccess: true,
             groupWorkspaceWrite: true,
+            groupFileDeliveryEnabled: true,
             telegram: "Keychain credential · one paired administrator",
             groups: []
         )
@@ -2621,6 +2628,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let groupAddressedThreads = toggle("Reply within addressed Codeshark threads", checked: security.groupRespondToAddressedThreads, x: 440, y: 312)
         let groupNetwork = toggle("Allow ordinary network research", checked: security.groupNetworkAccess, x: 440, y: 288)
         let groupWrite = toggle("Allow writes in the isolated group sandbox", checked: security.groupWorkspaceWrite, x: 440, y: 264)
+        let groupFileDelivery = toggle("Attach result files from the group sandbox", checked: security.groupFileDeliveryEnabled, x: 440, y: 240)
         securityGroupAutoEnable = groupAutoEnable
         securityGroupMemberRequests = groupRequests
         securityGroupAutoRegister = groupAutoRegister
@@ -2630,6 +2638,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         securityGroupAddressedThreads = groupAddressedThreads
         securityGroupNetwork = groupNetwork
         securityGroupWorkspaceWrite = groupWrite
+        securityGroupFileDelivery = groupFileDelivery
 
         let enabledGroupTitle = NSTextField(labelWithString: "ENABLED GROUPS (\(security.groups.count))")
         enabledGroupTitle.font = .systemFont(ofSize: 10, weight: .semibold)
@@ -2711,7 +2720,8 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let groupBotReplies = securityGroupBotReplies,
               let groupAddressedThreads = securityGroupAddressedThreads,
               let groupNetwork = securityGroupNetwork,
-              let groupWrite = securityGroupWorkspaceWrite
+              let groupWrite = securityGroupWorkspaceWrite,
+              let groupFileDelivery = securityGroupFileDelivery
         else {
             showError("Could not read the security settings.")
             return
@@ -2732,6 +2742,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--group-respond-to-addressed-threads", groupAddressedThreads.state == .on ? "true" : "false",
             "--group-network-access", groupNetwork.state == .on ? "true" : "false",
             "--group-workspace-write", groupWrite.state == .on ? "true" : "false",
+            "--group-file-delivery-enabled", groupFileDelivery.state == .on ? "true" : "false",
         ]
         if runServiceCommand(arguments) {
             backFromSecurity()
@@ -3493,6 +3504,7 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             securityGroupAddressedThreads = nil
             securityGroupNetwork = nil
             securityGroupWorkspaceWrite = nil
+            securityGroupFileDelivery = nil
         } else if window == localConsolePanel {
             localConsolePanel = nil
             localConsoleModel = nil

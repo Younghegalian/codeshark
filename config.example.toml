@@ -88,6 +88,8 @@ group_respond_to_bot_replies = true
 group_respond_to_addressed_threads = true
 group_network_access = true
 group_workspace_write = true
+# Attach regular result files produced in the same isolated group sandbox.
+group_file_delivery_enabled = true
 attachment_max_bytes = 10000000
 # Private administrator tasks may inspect, but never write, under these server-controlled roots.
 # Non-administrator group tasks cannot see these paths.

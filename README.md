@@ -44,7 +44,7 @@ Codeshark is a macOS-resident remote orchestration companion for the OpenAI Code
 | Academic figure layout | Arrange supplied figures on a consistent grid without distortion, then render and visually inspect the final placement before delivery. |
 | Journal manuscript QA | For manuscript authoring or revision, run a low-cost plan, author-side PDF/figure/typography audit, independent editorial review, and up to two correction-and-recheck cycles before delivery. |
 | Guarded execution | Keep unapproved work read-only and require explicit approval before mutation or external side effects. |
-| Isolated group analysis | Let directly addressed group members research and create sandbox-only analysis files without exposing private projects, tools, or administrator context. |
+| Isolated group analysis | Let directly addressed group members research, create sandbox-only analysis files, and receive those safe result files in the same group without exposing private projects, tools, or administrator context. |
 | Service-grade operation | Run the configured number of independent tasks concurrently, persist queued work, recover interrupted tasks, retry failed result delivery, rotate bounded data, and expose diagnostics and logs. |
 
 The useful unit is a finished task:
@@ -160,7 +160,7 @@ Use `/save KIND | TITLE | CONTENT` for durable structured facts that are broader
 Connecting an agent to local projects deserves a small, inspectable trust boundary:
 
 - Exactly one paired administrator receives the same memory, tools, and control commands in private chat or an enabled group. Each administrator chat retains its own persistent Codex session.
-- Non-administrator group requests are ephemeral, MCP-disabled, and confined to a separate sandbox; they may perform ordinary network research and create or modify only sandbox files.
+- Non-administrator group requests are ephemeral, MCP-disabled, and confined to a separate sandbox; they may perform ordinary network research, create or modify only sandbox files, and attach only the current request's safe result files to that same group when group file delivery is enabled.
 - Administrator mutations and external work wait for explicit approval; non-administrator writes are limited to the isolated group sandbox.
 - Project roots are fixed in local configuration and can never be supplied by a remote request.
 - The child process receives a strict environment allowlist; parent credentials and SSH-agent sockets are not forwarded.

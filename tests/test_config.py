@@ -141,6 +141,7 @@ class ConfigTests(unittest.TestCase):
                 group_respond_to_addressed_threads=False,
                 group_network_access=False,
                 group_workspace_write=False,
+                group_file_delivery_enabled=False,
                 config_path=config_path,
             )
 
@@ -158,6 +159,7 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(updated.group_respond_to_addressed_threads)
             self.assertFalse(updated.group_network_access)
             self.assertFalse(updated.group_workspace_write)
+            self.assertFalse(updated.group_file_delivery_enabled)
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("codex_network_access = true", text)
             self.assertIn("admin_full_access = true", text)
@@ -168,6 +170,7 @@ class ConfigTests(unittest.TestCase):
             self.assertIn("group_require_registered_members = true", text)
             self.assertIn("group_respond_to_mentions = false", text)
             self.assertIn("group_workspace_write = false", text)
+            self.assertIn("group_file_delivery_enabled = false", text)
             self.assertIn('primary_model = "gpt-5.6-sol"', text)
 
     def test_sets_model_assignments_without_rewriting_other_settings(self) -> None:

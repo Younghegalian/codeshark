@@ -69,6 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     security.add_argument("--group-respond-to-addressed-threads", required=True, choices=("true", "false"))
     security.add_argument("--group-network-access", required=True, choices=("true", "false"))
     security.add_argument("--group-workspace-write", required=True, choices=("true", "false"))
+    security.add_argument("--group-file-delivery-enabled", required=True, choices=("true", "false"))
     local_history_parser = commands.add_parser("local-history", help=argparse.SUPPRESS)
     local_history_parser.add_argument("--limit", type=int, default=100)
     local_send = commands.add_parser("local-send", help=argparse.SUPPRESS)
@@ -186,6 +187,7 @@ def main() -> int:
                 group_respond_to_addressed_threads=args.group_respond_to_addressed_threads == "true",
                 group_network_access=args.group_network_access == "true",
                 group_workspace_write=args.group_workspace_write == "true",
+                group_file_delivery_enabled=args.group_file_delivery_enabled == "true",
             )
             status = restart_when_idle()
             print(
@@ -199,7 +201,8 @@ def main() -> int:
                 f"group-registration={'automatic' if config.group_auto_register_members else 'manual'}, "
                 f"group-registered-only={'enabled' if config.group_require_registered_members else 'disabled'}, "
                 f"group-network={'enabled' if config.group_network_access else 'disabled'}, "
-                f"group-write={'enabled' if config.group_workspace_write else 'read-only'}"
+                f"group-write={'enabled' if config.group_workspace_write else 'read-only'}, "
+                f"group-file-delivery={'enabled' if config.group_file_delivery_enabled else 'disabled'}"
             )
             if status is None:
                 print("Restart: scheduled after active work finishes")
