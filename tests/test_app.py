@@ -345,6 +345,117 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIsNotNone(task)
         self.assertFalse(task.restricted)
 
+    def test_administrator_address_can_automatically_enable_a_group(self) -> None:
+        group_id = -100123
+        self.app.config = replace(self.config, group_auto_enable_on_admin_address=True)
+
+        self.app._handle_update(
+            self.update(
+                123,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+                title="Engineering",
+            )
+        )
+
+        self.assertTrue(self.app.store.is_group_enabled(group_id))
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.assertFalse(task.restricted)
+        self.assertTrue(task.prompt.endswith("Explain Python"))
+
+    def test_group_registration_requirement_supports_manual_and_automatic_registration(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.config = replace(
+            self.config,
+            group_require_registered_members=True,
+            group_auto_register_members=False,
+        )
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+        self.assertIsNone(self.app.store.claim_next_task())
+        self.assertIn("registered members", self.api.messages[-1][1])
+
+        self.app._handle_update(
+            self.update(123, "/register_member 456", "supergroup", chat_id=group_id)
+        )
+        self.assertTrue(self.app.store.is_group_member_registered(group_id, 456))
+        self.assertIn("Registered group member 456", self.api.messages[-1][1])
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+        task = self.app.store.claim_next_task()
+        self.assertIsNotNone(task)
+        self.assertTrue(task.restricted)
+
+        self.app.store.finish_task(task.id, "completed")
+        self.app.store.unregister_group_member(group_id, 456)
+        self.app.config = replace(self.app.config, group_auto_register_members=True)
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python again",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+        self.assertTrue(self.app.store.is_group_member_registered(group_id, 456))
+
+    def test_group_addressing_rules_can_be_disabled_independently(self) -> None:
+        group_id = -100123
+        self.app.store.enable_group(group_id, "Engineering", 123)
+        self.app.config = replace(
+            self.config,
+            group_respond_to_mentions=False,
+            group_respond_to_bot_replies=False,
+            group_respond_to_addressed_threads=False,
+        )
+
+        self.app._handle_update(
+            self.update(
+                456,
+                "@Codex_codeshark_bot Explain Python",
+                "supergroup",
+                chat_id=group_id,
+            )
+        )
+        self.app._handle_update(
+            self.update(
+                456,
+                "Explain Python",
+                "supergroup",
+                chat_id=group_id,
+                reply_to_bot=True,
+            )
+        )
+        self.app.store.remember_group_addressed_message(group_id, 77)
+        self.app._handle_update(
+            self.update(
+                456,
+                "Explain Python",
+                "supergroup",
+                chat_id=group_id,
+                reply_to_message_id=77,
+            )
+        )
+
+        self.assertIsNone(self.app.store.claim_next_task())
+
     def test_group_member_can_reply_to_a_codeshark_message_without_a_mention(self) -> None:
         group_id = -100123
         self.app.store.enable_group(group_id, "Engineering", 123)
@@ -774,6 +885,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             payload["security"]["group_member_requests_enabled"],
             self.config.group_member_requests_enabled,
         )
+        self.assertEqual(
+            payload["security"]["group_respond_to_mentions"],
+            self.config.group_respond_to_mentions,
+        )
+        self.assertEqual(payload["security"]["groups"], [])
         self.assertEqual(payload["model_assignments"][3]["model"], "gpt-5.6-sol")
         self.assertEqual(payload["model_assignments"][1]["role"], "Planner / Triage")
         self.assertEqual(payload["model_assignments"][3]["role"], "Primary")

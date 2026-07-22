@@ -434,6 +434,10 @@ class AgentStoreTests(unittest.TestCase):
             group = store.enable_group(-100123, "Engineering", 123)
             self.assertEqual(group.chat_id, -100123)
             self.assertTrue(store.is_group_enabled(-100123))
+            self.assertTrue(store.register_group_member(-100123, 456))
+            self.assertFalse(store.register_group_member(-100123, 456))
+            self.assertTrue(store.is_group_member_registered(-100123, 456))
+            self.assertEqual(store.group_member_count(-100123), 1)
 
             task = store.enqueue_task(
                 -100123,
@@ -449,9 +453,11 @@ class AgentStoreTests(unittest.TestCase):
 
             restored = AgentStore(path)
             self.assertTrue(restored.is_group_enabled(-100123))
+            self.assertTrue(restored.is_group_member_registered(-100123, 456))
             self.assertTrue(restored.get_task(task.id).restricted)
             self.assertTrue(restored.disable_group(-100123))
             self.assertEqual(restored.list_groups(), [])
+            self.assertFalse(restored.is_group_member_registered(-100123, 456))
             cancelled = restored.get_task(task.id)
             self.assertEqual(cancelled.status, "cancelled")
             self.assertEqual(cancelled.prompt, "")

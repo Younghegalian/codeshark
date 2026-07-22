@@ -74,7 +74,13 @@ admin_mcp_enabled = true
 admin_delegated_write_access = true
 # Non-administrator group controls. Requests must still directly address Codeshark
 # and stay in the server-controlled group sandbox with MCP disabled.
+group_auto_enable_on_admin_address = false
 group_member_requests_enabled = true
+group_auto_register_members = false
+group_require_registered_members = false
+group_respond_to_mentions = true
+group_respond_to_bot_replies = true
+group_respond_to_addressed_threads = true
 group_network_access = true
 group_workspace_write = true
 attachment_max_bytes = 10000000

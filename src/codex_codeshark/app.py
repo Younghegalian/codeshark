@@ -108,7 +108,10 @@ Writes are confined to the workspace and server-controlled delegated project roo
 
 GROUP_HELP_TEXT = """Group access is enabled.
 
-@BotUsername REQUEST or reply in a Codeshark conversation: submit a request
+Configured mention and reply rules determine how to submit a request.
+
+When registered members are required, the paired administrator can use /register_member USER_ID
+or reply to a member with that command. /unregister_member removes that registration.
 
 The paired administrator keeps the same session, capabilities, and approval flow as in a private
 chat. Other members receive an ephemeral, MCP-disabled agent that can research on the network and
@@ -534,6 +537,7 @@ class AgentApp:
             recent_manifests = self.store.recent_task_manifests(limit=8)
             failed_deliveries = self.store.list_failed_deliveries(limit=8)
             enabled_groups = self.store.list_groups()
+            group_member_counts = self.store.group_member_counts()
             activity_log = self.store.recent_model_runs(limit=20)
             manifests_by_task_id = {
                 manifest.task_id: manifest for manifest in recent_manifests
@@ -684,7 +688,13 @@ class AgentApp:
                             "admin_auto_approve_actions": self.config.admin_auto_approve_actions,
                             "admin_mcp_enabled": self.config.admin_mcp_enabled,
                             "admin_delegated_write_access": self.config.admin_delegated_write_access,
+                            "group_auto_enable_on_admin_address": self.config.group_auto_enable_on_admin_address,
                             "group_member_requests_enabled": self.config.group_member_requests_enabled,
+                            "group_auto_register_members": self.config.group_auto_register_members,
+                            "group_require_registered_members": self.config.group_require_registered_members,
+                            "group_respond_to_mentions": self.config.group_respond_to_mentions,
+                            "group_respond_to_bot_replies": self.config.group_respond_to_bot_replies,
+                            "group_respond_to_addressed_threads": self.config.group_respond_to_addressed_threads,
                             "group_network_access": self.config.group_network_access,
                             "group_workspace_write": self.config.group_workspace_write,
                             "telegram": "Keychain credential · one paired administrator",
@@ -693,6 +703,7 @@ class AgentApp:
                                     "chat_id": group.chat_id,
                                     "title": group.title,
                                     "enabled_at": int(group.enabled_at),
+                                    "member_count": group_member_counts.get(group.chat_id, 0),
                                 }
                                 for group in enabled_groups
                             ],
@@ -1335,19 +1346,47 @@ class AgentApp:
             if not is_admin:
                 return
             state = "enabled" if self.store.is_group_enabled(chat_id) else "disabled"
-            self._send_message(chat_id, f"Group access is {state}.")
+            member_count = self.store.group_member_count(chat_id)
+            self._send_message(
+                chat_id,
+                f"Group access is {state}. Registered members: {member_count}.",
+            )
             return
 
         message_id = message.get("message_id")
         reply_to_message_id = message_id if isinstance(message_id, int) else None
         enabled = self.store.is_group_enabled(chat_id)
         if not enabled:
-            if is_admin and self._extract_group_request(message, chat_id) is not None:
-                self._send_message(
-                    chat_id,
-                    "Group access is disabled. The paired administrator must run /enable_group.",
-                    reply_to_message_id=reply_to_message_id,
-                )
+            request = self._extract_group_request(message, chat_id)
+            if (
+                is_admin
+                and request is not None
+                and self.config.group_auto_enable_on_admin_address
+            ):
+                title = chat.get("title") if isinstance(chat.get("title"), str) else str(chat_id)
+                try:
+                    self.store.enable_group(chat_id, title, user_id)
+                except ValueError as exc:
+                    self._send_message(
+                        chat_id,
+                        f"Could not enable this group: {exc}",
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                    return
+                enabled = True
+            if not enabled:
+                if is_admin and request is not None:
+                    self._send_message(
+                        chat_id,
+                        "Group access is disabled. The paired administrator must run /enable_group.",
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                return
+
+        if is_admin and command in {"/register_member", "/unregister_member"}:
+            self._handle_group_member_registration(
+                message, chat_id, command, argument, reply_to_message_id
+            )
             return
 
         if is_admin and parsed is not None and self._handle_admin_command(chat_id, command, argument):
@@ -1359,8 +1398,6 @@ class AgentApp:
         request = self._extract_group_request(message, chat_id)
         if request is None:
             return
-        if reply_to_message_id is not None:
-            self.store.remember_group_addressed_message(chat_id, reply_to_message_id)
         if not request:
             self._send_message(
                 chat_id,
@@ -1369,6 +1406,8 @@ class AgentApp:
             )
             return
         if is_admin:
+            if reply_to_message_id is not None:
+                self.store.remember_group_addressed_message(chat_id, reply_to_message_id)
             self._enqueue_user_task(
                 chat_id,
                 request,
@@ -1382,6 +1421,21 @@ class AgentApp:
                 reply_to_message_id=reply_to_message_id,
             )
             return
+        if self.config.group_auto_register_members:
+            self.store.register_group_member(chat_id, user_id)
+        if (
+            self.config.group_require_registered_members
+            and not self.store.is_group_member_registered(chat_id, user_id)
+        ):
+            self._send_message(
+                chat_id,
+                "This group accepts requests only from registered members. "
+                "Ask the paired administrator to register you.",
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
+        if reply_to_message_id is not None:
+            self.store.remember_group_addressed_message(chat_id, reply_to_message_id)
         self._enqueue_group_task(
             chat_id,
             user_id,
@@ -1393,7 +1447,7 @@ class AgentApp:
         text = message.get("text")
         if not isinstance(text, str):
             return None
-        if self._bot_username is not None:
+        if self.config.group_respond_to_mentions and self._bot_username is not None:
             pattern = re.compile(
                 rf"(?<![A-Za-z0-9_])@{re.escape(self._bot_username)}(?![A-Za-z0-9_])",
                 flags=re.IGNORECASE,
@@ -1405,21 +1459,70 @@ class AgentApp:
         sender = reply.get("from") if isinstance(reply, dict) else None
         sender_id = sender.get("id") if isinstance(sender, dict) else None
         username = sender.get("username") if isinstance(sender, dict) else None
-        if self._bot_user_id is not None and sender_id == self._bot_user_id:
+        if (
+            self.config.group_respond_to_bot_replies
+            and self._bot_user_id is not None
+            and sender_id == self._bot_user_id
+        ):
             return text.strip()
         if (
-            self._bot_username is not None
+            self.config.group_respond_to_bot_replies
+            and self._bot_username is not None
             and isinstance(username, str)
             and username.casefold() == self._bot_username.casefold()
         ):
             return text.strip()
         reply_message_id = reply.get("message_id") if isinstance(reply, dict) else None
         if (
-            isinstance(reply_message_id, int)
+            self.config.group_respond_to_addressed_threads
+            and isinstance(reply_message_id, int)
             and self.store.is_group_addressed_message(chat_id, reply_message_id)
         ):
             return text.strip()
         return None
+
+    def _handle_group_member_registration(
+        self,
+        message: dict,
+        chat_id: int,
+        command: str,
+        argument: str,
+        reply_to_message_id: int | None,
+    ) -> None:
+        user_id: int | None = None
+        if argument:
+            try:
+                user_id = int(argument)
+            except ValueError:
+                user_id = None
+        if user_id is None:
+            reply = message.get("reply_to_message")
+            sender = reply.get("from") if isinstance(reply, dict) else None
+            candidate = sender.get("id") if isinstance(sender, dict) else None
+            if isinstance(candidate, int):
+                user_id = candidate
+        if user_id is None:
+            self._send_message(
+                chat_id,
+                f"Usage: {command} USER_ID, or reply to a member's message with {command}.",
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
+        if command == "/register_member":
+            added = self.store.register_group_member(chat_id, user_id)
+            text = (
+                f"Registered group member {user_id}."
+                if added
+                else f"Group member {user_id} is already registered."
+            )
+        else:
+            removed = self.store.unregister_group_member(chat_id, user_id)
+            text = (
+                f"Unregistered group member {user_id}."
+                if removed
+                else f"Group member {user_id} was not registered."
+            )
+        self._send_message(chat_id, text, reply_to_message_id=reply_to_message_id)
 
     def _enqueue_group_task(
         self,
@@ -4130,8 +4233,13 @@ class AgentApp:
         groups = self.store.list_groups()
         if not groups:
             return "No Telegram groups are enabled."
+        member_counts = self.store.group_member_counts()
         lines = ["Administrator-enabled Telegram groups:"]
-        lines.extend(f"{item.chat_id}: {item.title}" for item in groups)
+        lines.extend(
+            f"{item.chat_id}: {item.title} "
+            f"(registered members: {member_counts.get(item.chat_id, 0)})"
+            for item in groups
+        )
         lines.append("\nDisable one with /disable_group CHAT_ID.")
         return "\n".join(lines)
 

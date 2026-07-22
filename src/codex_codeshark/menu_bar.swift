@@ -127,6 +127,7 @@ struct DashboardSecurityGroup: Decodable, Identifiable {
     let chatID: Int
     let title: String
     let enabledAt: Int
+    let memberCount: Int?
 
     var id: String { String(chatID) }
 
@@ -134,6 +135,7 @@ struct DashboardSecurityGroup: Decodable, Identifiable {
         case title
         case chatID = "chat_id"
         case enabledAt = "enabled_at"
+        case memberCount = "member_count"
     }
 }
 
@@ -144,7 +146,13 @@ struct DashboardSecurity: Decodable {
     let adminAutoApproveActions: Bool
     let adminMcpEnabled: Bool
     let adminDelegatedWriteAccess: Bool
+    let groupAutoEnableOnAdminAddress: Bool
     let groupMemberRequestsEnabled: Bool
+    let groupAutoRegisterMembers: Bool
+    let groupRequireRegisteredMembers: Bool
+    let groupRespondToMentions: Bool
+    let groupRespondToBotReplies: Bool
+    let groupRespondToAddressedThreads: Bool
     let groupNetworkAccess: Bool
     let groupWorkspaceWrite: Bool
     let telegram: String
@@ -157,7 +165,13 @@ struct DashboardSecurity: Decodable {
         case adminAutoApproveActions = "admin_auto_approve_actions"
         case adminMcpEnabled = "admin_mcp_enabled"
         case adminDelegatedWriteAccess = "admin_delegated_write_access"
+        case groupAutoEnableOnAdminAddress = "group_auto_enable_on_admin_address"
         case groupMemberRequestsEnabled = "group_member_requests_enabled"
+        case groupAutoRegisterMembers = "group_auto_register_members"
+        case groupRequireRegisteredMembers = "group_require_registered_members"
+        case groupRespondToMentions = "group_respond_to_mentions"
+        case groupRespondToBotReplies = "group_respond_to_bot_replies"
+        case groupRespondToAddressedThreads = "group_respond_to_addressed_threads"
         case groupNetworkAccess = "group_network_access"
         case groupWorkspaceWrite = "group_workspace_write"
     }
@@ -169,7 +183,13 @@ struct DashboardSecurity: Decodable {
         adminAutoApproveActions: Bool,
         adminMcpEnabled: Bool,
         adminDelegatedWriteAccess: Bool,
+        groupAutoEnableOnAdminAddress: Bool,
         groupMemberRequestsEnabled: Bool,
+        groupAutoRegisterMembers: Bool,
+        groupRequireRegisteredMembers: Bool,
+        groupRespondToMentions: Bool,
+        groupRespondToBotReplies: Bool,
+        groupRespondToAddressedThreads: Bool,
         groupNetworkAccess: Bool,
         groupWorkspaceWrite: Bool,
         telegram: String,
@@ -181,7 +201,13 @@ struct DashboardSecurity: Decodable {
         self.adminAutoApproveActions = adminAutoApproveActions
         self.adminMcpEnabled = adminMcpEnabled
         self.adminDelegatedWriteAccess = adminDelegatedWriteAccess
+        self.groupAutoEnableOnAdminAddress = groupAutoEnableOnAdminAddress
         self.groupMemberRequestsEnabled = groupMemberRequestsEnabled
+        self.groupAutoRegisterMembers = groupAutoRegisterMembers
+        self.groupRequireRegisteredMembers = groupRequireRegisteredMembers
+        self.groupRespondToMentions = groupRespondToMentions
+        self.groupRespondToBotReplies = groupRespondToBotReplies
+        self.groupRespondToAddressedThreads = groupRespondToAddressedThreads
         self.groupNetworkAccess = groupNetworkAccess
         self.groupWorkspaceWrite = groupWorkspaceWrite
         self.telegram = telegram
@@ -196,7 +222,13 @@ struct DashboardSecurity: Decodable {
         adminAutoApproveActions = try container.decodeIfPresent(Bool.self, forKey: .adminAutoApproveActions) ?? adminFullAccess
         adminMcpEnabled = try container.decodeIfPresent(Bool.self, forKey: .adminMcpEnabled) ?? true
         adminDelegatedWriteAccess = try container.decodeIfPresent(Bool.self, forKey: .adminDelegatedWriteAccess) ?? true
+        groupAutoEnableOnAdminAddress = try container.decodeIfPresent(Bool.self, forKey: .groupAutoEnableOnAdminAddress) ?? false
         groupMemberRequestsEnabled = try container.decodeIfPresent(Bool.self, forKey: .groupMemberRequestsEnabled) ?? true
+        groupAutoRegisterMembers = try container.decodeIfPresent(Bool.self, forKey: .groupAutoRegisterMembers) ?? false
+        groupRequireRegisteredMembers = try container.decodeIfPresent(Bool.self, forKey: .groupRequireRegisteredMembers) ?? false
+        groupRespondToMentions = try container.decodeIfPresent(Bool.self, forKey: .groupRespondToMentions) ?? true
+        groupRespondToBotReplies = try container.decodeIfPresent(Bool.self, forKey: .groupRespondToBotReplies) ?? true
+        groupRespondToAddressedThreads = try container.decodeIfPresent(Bool.self, forKey: .groupRespondToAddressedThreads) ?? true
         groupNetworkAccess = try container.decodeIfPresent(Bool.self, forKey: .groupNetworkAccess) ?? true
         groupWorkspaceWrite = try container.decodeIfPresent(Bool.self, forKey: .groupWorkspaceWrite) ?? true
         telegram = try container.decodeIfPresent(String.self, forKey: .telegram) ?? "Keychain credential"
@@ -2211,7 +2243,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
     private var securityAdminAutoApprove: NSButton?
     private var securityAdminMcp: NSButton?
     private var securityAdminDelegatedWrite: NSButton?
+    private var securityGroupAutoEnable: NSButton?
     private var securityGroupMemberRequests: NSButton?
+    private var securityGroupAutoRegister: NSButton?
+    private var securityGroupRegisteredOnly: NSButton?
+    private var securityGroupMentions: NSButton?
+    private var securityGroupBotReplies: NSButton?
+    private var securityGroupAddressedThreads: NSButton?
     private var securityGroupNetwork: NSButton?
     private var securityGroupWorkspaceWrite: NSButton?
     private var modelPickers: [String: NSPopUpButton] = [:]
@@ -2499,14 +2537,20 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             adminAutoApproveActions: false,
             adminMcpEnabled: true,
             adminDelegatedWriteAccess: true,
+            groupAutoEnableOnAdminAddress: false,
             groupMemberRequestsEnabled: true,
+            groupAutoRegisterMembers: false,
+            groupRequireRegisteredMembers: false,
+            groupRespondToMentions: true,
+            groupRespondToBotReplies: true,
+            groupRespondToAddressedThreads: true,
             groupNetworkAccess: true,
             groupWorkspaceWrite: true,
             telegram: "Keychain credential · one paired administrator",
             groups: []
         )
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 740, height: 690),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 720),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -2519,43 +2563,39 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let content = NSView(frame: panel.contentView?.bounds ?? .zero)
         let title = NSTextField(labelWithString: "Security Settings")
         title.font = .systemFont(ofSize: 16, weight: .semibold)
-        title.frame = NSRect(x: 20, y: 648, width: 700, height: 21)
+        title.frame = NSRect(x: 20, y: 678, width: 820, height: 21)
         content.addSubview(title)
         let detail = NSTextField(wrappingLabelWithString: "Changes save now and apply after active work finishes. Administrator and group-member permissions are intentionally separate.")
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.frame = NSRect(x: 20, y: 614, width: 700, height: 28)
+        detail.frame = NSRect(x: 20, y: 644, width: 820, height: 28)
         content.addSubview(detail)
 
         let execution = NSTextField(labelWithString: "ADMINISTRATOR · PRIVATE CHAT AND ENABLED GROUPS")
         execution.font = .systemFont(ofSize: 10, weight: .semibold)
         execution.textColor = .secondaryLabelColor
-        execution.frame = NSRect(x: 20, y: 582, width: 390, height: 14)
+        execution.frame = NSRect(x: 20, y: 612, width: 390, height: 14)
         content.addSubview(execution)
         let sandbox = NSTextField(labelWithString: "Default sandbox · \(security.sandbox)")
         sandbox.font = .systemFont(ofSize: 11)
         sandbox.textColor = .secondaryLabelColor
         sandbox.alignment = .right
-        sandbox.frame = NSRect(x: 430, y: 581, width: 290, height: 16)
+        sandbox.frame = NSRect(x: 560, y: 611, width: 280, height: 16)
         content.addSubview(sandbox)
 
-        func toggle(_ title: String, checked: Bool, y: CGFloat) -> NSButton {
+        func toggle(_ title: String, checked: Bool, x: CGFloat, y: CGFloat) -> NSButton {
             let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
             button.state = checked ? .on : .off
-            button.font = .systemFont(ofSize: 12)
-            button.frame = NSRect(x: 20, y: y, width: 500, height: 20)
+            button.font = .systemFont(ofSize: 11)
+            button.frame = NSRect(x: x, y: y, width: 400, height: 20)
             content.addSubview(button)
             return button
         }
-        let network = NSButton(checkboxWithTitle: "Allow network access", target: nil, action: nil)
-        network.state = security.networkAccess ? .on : .off
-        network.font = .systemFont(ofSize: 12)
-        network.frame = NSRect(x: 20, y: 550, width: 580, height: 20)
-        content.addSubview(network)
-        let fullAccess = toggle("Allow unrestricted filesystem access", checked: security.adminFullAccess, y: 524)
-        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, y: 498)
-        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, y: 472)
-        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, y: 446)
+        let network = toggle("Allow network access", checked: security.networkAccess, x: 20, y: 582)
+        let fullAccess = toggle("Allow unrestricted filesystem access", checked: security.adminFullAccess, x: 20, y: 558)
+        let autoApprove = toggle("Automatically approve administrator actions", checked: security.adminAutoApproveActions, x: 20, y: 534)
+        let mcp = toggle("Enable configured MCP connectors", checked: security.adminMcpEnabled, x: 20, y: 510)
+        let delegatedWrite = toggle("Allow writes to configured delegated project roots", checked: security.adminDelegatedWriteAccess, x: 20, y: 486)
         securityNetworkAccess = network
         securityAdminFullAccess = fullAccess
         securityAdminAutoApprove = autoApprove
@@ -2565,26 +2605,39 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         let groups = NSTextField(labelWithString: "NON-ADMIN GROUP MEMBERS · ENABLED GROUPS ONLY")
         groups.font = .systemFont(ofSize: 10, weight: .semibold)
         groups.textColor = .secondaryLabelColor
-        groups.frame = NSRect(x: 20, y: 410, width: 390, height: 14)
+        groups.frame = NSRect(x: 440, y: 612, width: 400, height: 14)
         content.addSubview(groups)
-        let groupRequests = toggle("Accept direct requests from non-admin members", checked: security.groupMemberRequestsEnabled, y: 378)
-        let groupNetwork = toggle("Allow ordinary network research", checked: security.groupNetworkAccess, y: 352)
-        let groupWrite = toggle("Allow files to be created or edited in the group sandbox", checked: security.groupWorkspaceWrite, y: 326)
+        let groupAutoEnable = toggle("Auto-enable when the paired administrator addresses Codeshark", checked: security.groupAutoEnableOnAdminAddress, x: 440, y: 582)
+        let groupRequests = toggle("Accept non-admin member requests", checked: security.groupMemberRequestsEnabled, x: 440, y: 558)
+        let groupAutoRegister = toggle("Auto-register members after their first accepted request", checked: security.groupAutoRegisterMembers, x: 440, y: 534)
+        let groupRegisteredOnly = toggle("Require registered members", checked: security.groupRequireRegisteredMembers, x: 440, y: 510)
+        groupRegisteredOnly.toolTip = "When automatic registration is off, use /register_member USER_ID or reply to a member with that command."
+        let groupMentions = toggle("Reply to direct mentions", checked: security.groupRespondToMentions, x: 440, y: 486)
+        let groupBotReplies = toggle("Reply to direct replies to Codeshark", checked: security.groupRespondToBotReplies, x: 440, y: 462)
+        let groupAddressedThreads = toggle("Reply within addressed Codeshark threads", checked: security.groupRespondToAddressedThreads, x: 440, y: 438)
+        let groupNetwork = toggle("Allow ordinary network research", checked: security.groupNetworkAccess, x: 440, y: 414)
+        let groupWrite = toggle("Allow writes in the isolated group sandbox", checked: security.groupWorkspaceWrite, x: 440, y: 390)
+        securityGroupAutoEnable = groupAutoEnable
         securityGroupMemberRequests = groupRequests
+        securityGroupAutoRegister = groupAutoRegister
+        securityGroupRegisteredOnly = groupRegisteredOnly
+        securityGroupMentions = groupMentions
+        securityGroupBotReplies = groupBotReplies
+        securityGroupAddressedThreads = groupAddressedThreads
         securityGroupNetwork = groupNetwork
         securityGroupWorkspaceWrite = groupWrite
 
         let enabledGroupTitle = NSTextField(labelWithString: "ENABLED GROUPS (\(security.groups.count))")
         enabledGroupTitle.font = .systemFont(ofSize: 10, weight: .semibold)
         enabledGroupTitle.textColor = .secondaryLabelColor
-        enabledGroupTitle.frame = NSRect(x: 20, y: 294, width: 200, height: 14)
+        enabledGroupTitle.frame = NSRect(x: 20, y: 422, width: 200, height: 14)
         content.addSubview(enabledGroupTitle)
-        let groupList = NSScrollView(frame: NSRect(x: 20, y: 190, width: 700, height: 94))
+        let groupList = NSScrollView(frame: NSRect(x: 20, y: 266, width: 820, height: 144))
         groupList.borderType = .bezelBorder
         groupList.hasVerticalScroller = true
         groupList.autohidesScrollers = true
         groupList.drawsBackground = false
-        let groupText = NSTextView(frame: NSRect(x: 0, y: 0, width: 680, height: 94))
+        let groupText = NSTextView(frame: NSRect(x: 0, y: 0, width: 800, height: 144))
         groupText.isEditable = false
         groupText.isSelectable = true
         groupText.drawsBackground = false
@@ -2592,41 +2645,41 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
         groupText.textColor = .secondaryLabelColor
         groupText.textContainerInset = NSSize(width: 8, height: 7)
         let groupRows = security.groups.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }.map {
-            "\($0.title)\n  Chat ID \($0.chatID) · enabled \(timeAgoText($0.enabledAt))"
+            "\($0.title)\n  Chat ID \($0.chatID) · \($0.memberCount ?? 0) registered · enabled \(timeAgoText($0.enabledAt))"
         }
         groupText.string = groupRows.isEmpty ? "No groups are enabled. An administrator can enable a group with /enable_group." : groupRows.joined(separator: "\n\n")
-        groupText.frame.size.height = max(94, CGFloat(groupRows.count) * 44 + 14)
+        groupText.frame.size.height = max(144, CGFloat(groupRows.count) * 44 + 14)
         groupList.documentView = groupText
         content.addSubview(groupList)
 
         let fixed = NSTextField(labelWithString: "FIXED NON-ADMIN BOUNDARIES")
         fixed.font = .systemFont(ofSize: 10, weight: .semibold)
         fixed.textColor = .secondaryLabelColor
-        fixed.frame = NSRect(x: 20, y: 158, width: 240, height: 14)
+        fixed.frame = NSRect(x: 20, y: 236, width: 240, height: 14)
         content.addSubview(fixed)
-        let groupPolicy = NSTextField(wrappingLabelWithString: "Direct mention or reply is always required. Members never access administrator memory, credentials, configured project roots, full filesystem access, or MCP connectors.")
+        let groupPolicy = NSTextField(wrappingLabelWithString: "Only enabled direct-address rules can start a request. Members never access administrator memory, credentials, configured project roots, full filesystem access, or MCP connectors.")
         groupPolicy.font = .systemFont(ofSize: 11)
         groupPolicy.textColor = .secondaryLabelColor
-        groupPolicy.frame = NSRect(x: 20, y: 116, width: 700, height: 34)
+        groupPolicy.frame = NSRect(x: 20, y: 194, width: 820, height: 30)
         content.addSubview(groupPolicy)
 
         let local = NSTextField(wrappingLabelWithString: "Blocked for members: dependency or plugin installation, deployment or production control, destructive actions, and external state-changing actions.")
         local.font = .systemFont(ofSize: 11)
         local.textColor = .secondaryLabelColor
-        local.frame = NSRect(x: 20, y: 76, width: 700, height: 28)
+        local.frame = NSRect(x: 20, y: 158, width: 820, height: 24)
         content.addSubview(local)
 
-        let separator = NSBox(frame: NSRect(x: 20, y: 43, width: 700, height: 1))
+        let separator = NSBox(frame: NSRect(x: 20, y: 52, width: 820, height: 1))
         separator.boxType = .separator
         content.addSubview(separator)
         let back = NSButton(title: "Back", target: self, action: #selector(backFromSecurity))
         back.bezelStyle = .rounded
-        back.frame = NSRect(x: 20, y: 9, width: 84, height: 26)
+        back.frame = NSRect(x: 20, y: 16, width: 84, height: 26)
         content.addSubview(back)
         let apply = NSButton(title: "Apply", target: self, action: #selector(applySecurity))
         apply.bezelStyle = .rounded
         apply.keyEquivalent = "\r"
-        apply.frame = NSRect(x: 636, y: 9, width: 84, height: 26)
+        apply.frame = NSRect(x: 756, y: 16, width: 84, height: 26)
         content.addSubview(apply)
         panel.contentView = content
         panel.center()
@@ -2646,7 +2699,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
               let autoApprove = securityAdminAutoApprove,
               let mcp = securityAdminMcp,
               let delegatedWrite = securityAdminDelegatedWrite,
+              let groupAutoEnable = securityGroupAutoEnable,
               let groupRequests = securityGroupMemberRequests,
+              let groupAutoRegister = securityGroupAutoRegister,
+              let groupRegisteredOnly = securityGroupRegisteredOnly,
+              let groupMentions = securityGroupMentions,
+              let groupBotReplies = securityGroupBotReplies,
+              let groupAddressedThreads = securityGroupAddressedThreads,
               let groupNetwork = securityGroupNetwork,
               let groupWrite = securityGroupWorkspaceWrite
         else {
@@ -2660,7 +2719,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             "--admin-auto-approve-actions", autoApprove.state == .on ? "true" : "false",
             "--admin-mcp-enabled", mcp.state == .on ? "true" : "false",
             "--admin-delegated-write-access", delegatedWrite.state == .on ? "true" : "false",
+            "--group-auto-enable-on-admin-address", groupAutoEnable.state == .on ? "true" : "false",
             "--group-member-requests-enabled", groupRequests.state == .on ? "true" : "false",
+            "--group-auto-register-members", groupAutoRegister.state == .on ? "true" : "false",
+            "--group-require-registered-members", groupRegisteredOnly.state == .on ? "true" : "false",
+            "--group-respond-to-mentions", groupMentions.state == .on ? "true" : "false",
+            "--group-respond-to-bot-replies", groupBotReplies.state == .on ? "true" : "false",
+            "--group-respond-to-addressed-threads", groupAddressedThreads.state == .on ? "true" : "false",
             "--group-network-access", groupNetwork.state == .on ? "true" : "false",
             "--group-workspace-write", groupWrite.state == .on ? "true" : "false",
         ]
@@ -3394,7 +3459,13 @@ final class CodesharkStatusBar: NSObject, NSApplicationDelegate, NSWindowDelegat
             securityAdminAutoApprove = nil
             securityAdminMcp = nil
             securityAdminDelegatedWrite = nil
+            securityGroupAutoEnable = nil
             securityGroupMemberRequests = nil
+            securityGroupAutoRegister = nil
+            securityGroupRegisteredOnly = nil
+            securityGroupMentions = nil
+            securityGroupBotReplies = nil
+            securityGroupAddressedThreads = nil
             securityGroupNetwork = nil
             securityGroupWorkspaceWrite = nil
         } else if window == localConsolePanel {

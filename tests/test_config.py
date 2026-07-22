@@ -132,7 +132,13 @@ class ConfigTests(unittest.TestCase):
                 admin_auto_approve_actions=True,
                 admin_mcp_enabled=False,
                 admin_delegated_write_access=False,
+                group_auto_enable_on_admin_address=True,
                 group_member_requests_enabled=False,
+                group_auto_register_members=True,
+                group_require_registered_members=True,
+                group_respond_to_mentions=False,
+                group_respond_to_bot_replies=False,
+                group_respond_to_addressed_threads=False,
                 group_network_access=False,
                 group_workspace_write=False,
                 config_path=config_path,
@@ -143,14 +149,24 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(updated.admin_auto_approve_actions)
             self.assertFalse(updated.admin_mcp_enabled)
             self.assertFalse(updated.admin_delegated_write_access)
+            self.assertTrue(updated.group_auto_enable_on_admin_address)
             self.assertFalse(updated.group_member_requests_enabled)
+            self.assertTrue(updated.group_auto_register_members)
+            self.assertTrue(updated.group_require_registered_members)
+            self.assertFalse(updated.group_respond_to_mentions)
+            self.assertFalse(updated.group_respond_to_bot_replies)
+            self.assertFalse(updated.group_respond_to_addressed_threads)
             self.assertFalse(updated.group_network_access)
             self.assertFalse(updated.group_workspace_write)
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("codex_network_access = true", text)
             self.assertIn("admin_full_access = true", text)
             self.assertIn("admin_mcp_enabled = false", text)
+            self.assertIn("group_auto_enable_on_admin_address = true", text)
             self.assertIn("group_member_requests_enabled = false", text)
+            self.assertIn("group_auto_register_members = true", text)
+            self.assertIn("group_require_registered_members = true", text)
+            self.assertIn("group_respond_to_mentions = false", text)
             self.assertIn("group_workspace_write = false", text)
             self.assertIn('primary_model = "gpt-5.6-sol"', text)
 

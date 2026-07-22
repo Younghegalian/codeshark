@@ -525,6 +525,14 @@ class AgentStore:
                 );
                 CREATE INDEX IF NOT EXISTS group_addressed_messages_recent
                     ON group_addressed_messages(chat_id, created_at);
+                CREATE TABLE IF NOT EXISTS group_members (
+                    chat_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    registered_at REAL NOT NULL,
+                    PRIMARY KEY (chat_id, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS group_members_by_chat
+                    ON group_members(chat_id, registered_at);
                 """
             )
             task_columns = {
@@ -1531,7 +1539,50 @@ class AgentStore:
             )
             connection.execute("DELETE FROM group_context WHERE chat_id = ?", (chat_id,))
             connection.execute("DELETE FROM group_addressed_messages WHERE chat_id = ?", (chat_id,))
+            connection.execute("DELETE FROM group_members WHERE chat_id = ?", (chat_id,))
             return cursor.rowcount == 1
+
+    def register_group_member(
+        self, chat_id: int, user_id: int, *, now: float | None = None
+    ) -> bool:
+        registered_at = time.time() if now is None else now
+        with self._lock, self._connect() as connection:
+            if connection.execute(
+                "SELECT 1 FROM group_chats WHERE chat_id = ?", (chat_id,)
+            ).fetchone() is None:
+                return False
+            cursor = connection.execute(
+                "INSERT OR IGNORE INTO group_members (chat_id, user_id, registered_at) "
+                "VALUES (?, ?, ?)",
+                (chat_id, user_id, registered_at),
+            )
+        return cursor.rowcount == 1
+
+    def unregister_group_member(self, chat_id: int, user_id: int) -> bool:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM group_members WHERE chat_id = ? AND user_id = ?",
+                (chat_id, user_id),
+            )
+        return cursor.rowcount == 1
+
+    def is_group_member_registered(self, chat_id: int, user_id: int) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM group_members WHERE chat_id = ? AND user_id = ?",
+                (chat_id, user_id),
+            ).fetchone()
+        return row is not None
+
+    def group_member_counts(self) -> dict[int, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT chat_id, COUNT(*) AS count FROM group_members GROUP BY chat_id"
+            ).fetchall()
+        return {int(row["chat_id"]): int(row["count"]) for row in rows}
+
+    def group_member_count(self, chat_id: int) -> int:
+        return self.group_member_counts().get(chat_id, 0)
 
     def group_context(
         self,

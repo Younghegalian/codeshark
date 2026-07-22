@@ -89,6 +89,8 @@ def _sanitize_database(path: Path) -> None:
                 connection.execute("DELETE FROM group_context")
             if "group_addressed_messages" in tables:
                 connection.execute("DELETE FROM group_addressed_messages")
+            if "group_members" in tables:
+                connection.execute("DELETE FROM group_members")
     except sqlite3.Error as exc:
         raise MigrationError(f"invalid personal-data database: {exc}") from exc
 

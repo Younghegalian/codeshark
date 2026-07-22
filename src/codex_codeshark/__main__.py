@@ -60,7 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     security.add_argument("--admin-auto-approve-actions", required=True, choices=("true", "false"))
     security.add_argument("--admin-mcp-enabled", required=True, choices=("true", "false"))
     security.add_argument("--admin-delegated-write-access", required=True, choices=("true", "false"))
+    security.add_argument("--group-auto-enable-on-admin-address", required=True, choices=("true", "false"))
     security.add_argument("--group-member-requests-enabled", required=True, choices=("true", "false"))
+    security.add_argument("--group-auto-register-members", required=True, choices=("true", "false"))
+    security.add_argument("--group-require-registered-members", required=True, choices=("true", "false"))
+    security.add_argument("--group-respond-to-mentions", required=True, choices=("true", "false"))
+    security.add_argument("--group-respond-to-bot-replies", required=True, choices=("true", "false"))
+    security.add_argument("--group-respond-to-addressed-threads", required=True, choices=("true", "false"))
     security.add_argument("--group-network-access", required=True, choices=("true", "false"))
     security.add_argument("--group-workspace-write", required=True, choices=("true", "false"))
     local_history_parser = commands.add_parser("local-history", help=argparse.SUPPRESS)
@@ -167,7 +173,13 @@ def main() -> int:
                 admin_auto_approve_actions=args.admin_auto_approve_actions == "true",
                 admin_mcp_enabled=args.admin_mcp_enabled == "true",
                 admin_delegated_write_access=args.admin_delegated_write_access == "true",
+                group_auto_enable_on_admin_address=args.group_auto_enable_on_admin_address == "true",
                 group_member_requests_enabled=args.group_member_requests_enabled == "true",
+                group_auto_register_members=args.group_auto_register_members == "true",
+                group_require_registered_members=args.group_require_registered_members == "true",
+                group_respond_to_mentions=args.group_respond_to_mentions == "true",
+                group_respond_to_bot_replies=args.group_respond_to_bot_replies == "true",
+                group_respond_to_addressed_threads=args.group_respond_to_addressed_threads == "true",
                 group_network_access=args.group_network_access == "true",
                 group_workspace_write=args.group_workspace_write == "true",
             )
@@ -178,7 +190,10 @@ def main() -> int:
                 f"administrator={'full' if config.admin_full_access else 'workspace'}, "
                 f"auto-approval={'enabled' if config.admin_auto_approve_actions else 'required'}, "
                 f"MCP={'enabled' if config.admin_mcp_enabled else 'disabled'}, "
+                f"group-auto-enable={'enabled' if config.group_auto_enable_on_admin_address else 'disabled'}, "
                 f"group-requests={'enabled' if config.group_member_requests_enabled else 'disabled'}, "
+                f"group-registration={'automatic' if config.group_auto_register_members else 'manual'}, "
+                f"group-registered-only={'enabled' if config.group_require_registered_members else 'disabled'}, "
                 f"group-network={'enabled' if config.group_network_access else 'disabled'}, "
                 f"group-write={'enabled' if config.group_workspace_write else 'read-only'}"
             )
