@@ -208,6 +208,50 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             "message": message,
         }
 
+    def write_persisted_conversation(
+        self,
+        thread_id: str,
+        user_request: str,
+        assistant_reply: str,
+    ) -> None:
+        path = (
+            self.config.codex_home
+            / "sessions"
+            / "2026"
+            / "07"
+            / "23"
+            / f"rollout-test-{thread_id}.jsonl"
+        )
+        path.parent.mkdir(parents=True)
+        records = (
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{
+                        "type": "input_text",
+                        "text": (
+                            "[Codeshark identity]\n...\n\n[Current user request]\n"
+                            f"{user_request}\n\n[Live project work context]\n..."
+                        ),
+                    }],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": assistant_reply}],
+                },
+            },
+        )
+        path.write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n",
+            encoding="utf-8",
+        )
+
     def test_ignores_unauthorized_user(self) -> None:
         self.app._handle_update(self.update(999, "do work"))
         self.assertEqual(self.app.store.pending_count(), 0)
@@ -1352,6 +1396,56 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             stderr="Selected model is at capacity.",
         )
         self.assertEqual(self.app._failure_kind(failure), "model-capacity")
+
+    def test_cross_validation_workers_receive_shared_project_context(self) -> None:
+        primary = FakeCodexRunner(
+            RunResult(exit_code=0, message="Primary handoff.", thread_id="primary-thread", stderr="")
+        )
+        preflight = FakeCodexRunner()
+        research = FakeCodexRunner()
+        validator = FakeCodexRunner(
+            RunResult(exit_code=0, message="VERDICT: PASS", thread_id="validator-thread", stderr="")
+        )
+        finalizer = FakeCodexRunner(
+            RunResult(exit_code=0, message="Completed.", thread_id="primary-thread", stderr="")
+        )
+        context = (
+            "[same-chat project conversation]\n"
+            "User: Continue the existing simulation.\n"
+            "Codeshark: The 32-layer run is active.\n"
+            "[/same-chat project conversation]"
+        )
+
+        self.app._run_cross_validation_workflow(
+            primary,
+            primary,
+            validator,
+            validator,
+            preflight,
+            research,
+            finalizer,
+            "Complete the existing simulation.",
+            None,
+            request="Complete the existing simulation.",
+            task_context=context,
+            plan=WorkflowPlan(
+                "high-assurance",
+                uses_preflight=True,
+                uses_research=True,
+                uses_validator=True,
+                uses_finalizer=True,
+            ),
+            approved=True,
+            full_access=False,
+            file_delivery_enabled=False,
+            automatic_file_delivery=False,
+            task_id="shared-context-task",
+            capacity_recovery_runner=primary,
+        )
+
+        self.assertIn("Continue the existing simulation.", preflight.prompts[0][0])
+        self.assertIn("The 32-layer run is active.", research.prompts[0][0])
+        self.assertIn("Continue the existing simulation.", validator.prompts[0][0])
 
     def test_local_result_is_recorded_without_telegram_delivery(self) -> None:
         artifact = self.config.workdir / "local-result.md"
@@ -2661,7 +2755,7 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             prompt,
         )
 
-    def test_triage_receives_active_project_memory_without_replaying_the_session(self) -> None:
+    def test_triage_receives_full_active_project_conversation(self) -> None:
         project = "gnw_transport_paper"
         task = self.app.store.enqueue_task(
             123,
@@ -2671,6 +2765,11 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.app.memory.add("Use concise public academic terminology.", scope=project)
         self.app.state.set_session_thread_id(123, "thread-project", project)
+        self.write_persisted_conversation(
+            "thread-project",
+            "Finish the simulation we were already running.",
+            "The 32-layer simulation is active; report whether it finished before starting new work.",
+        )
         runner = FakeCodexRunner(
             triage_message='{"tier": "routine", "confidence": "high", "reason": "test"}'
         )
@@ -2681,6 +2780,34 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("Active project: gnw_transport_paper", prompt)
         self.assertIn("Persistent project session: available", prompt)
         self.assertIn("Use concise public academic terminology.", prompt)
+        self.assertIn("Finish the simulation we were already running.", prompt)
+        self.assertIn("The 32-layer simulation is active", prompt)
+        self.assertIn("including one that needs prior project context", prompt)
+
+    def test_project_router_receives_same_chat_context_from_other_project_sessions(self) -> None:
+        (self.config.workdir / "FETM").mkdir()
+        self.app.state.set_session_thread_id(123, "fetm-thread", "FETM")
+        self.write_persisted_conversation(
+            "fetm-thread",
+            "Continue the FETM wall-hit simulation.",
+            "The FETM convergence run is still active.",
+        )
+        runner = FakeCodexRunner(
+            project_triage_message='{"decision": "existing", "project": "FETM", "confidence": "high"}'
+        )
+        task = self.app.store.enqueue_task(
+            123,
+            "Please finish the previous simulation.",
+            source="telegram",
+            ephemeral=False,
+        )
+
+        self.app._execute_task(task, runner=runner)
+
+        prompt = runner.project_triage_prompts[0][0]
+        self.assertIn("[Project: FETM]", prompt)
+        self.assertIn("Continue the FETM wall-hit simulation.", prompt)
+        self.assertIn("The FETM convergence run is still active.", prompt)
 
     def test_triage_agent_uses_saved_orchestration_settings(self) -> None:
         app = AgentApp(
