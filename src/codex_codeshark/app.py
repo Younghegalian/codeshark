@@ -3186,9 +3186,6 @@ class AgentApp:
             text = " ".join(memory.text.split())
             if text:
                 lines.append(f"Current project memory: {text[:280]}")
-        ssot = self._project_ssot_context(active_project)
-        if ssot:
-            lines.append(ssot)
         names = {item.name for item in candidates}
         project_cues: dict[str, list[str]] = {name: [] for name in names}
         for memory in self.memory.list():

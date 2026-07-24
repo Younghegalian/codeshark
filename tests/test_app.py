@@ -1704,6 +1704,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
     def test_project_router_receives_existing_project_memory_cues(self) -> None:
         (self.config.workdir / "gnw_transport_paper").mkdir()
+        (self.config.workdir / "gnw_transport_paper" / "PROJECT_SSOT.md").write_text(
+            "# Project SSOT\n\nConfidential full project brief that belongs to execution.\n",
+            encoding="utf-8",
+        )
         self.app.memory.upsert(
             "Figure revision status",
             "Figure 8 marker colors must match the SEM panels.",
@@ -1725,6 +1729,10 @@ class AgentAppAuthorizationTests(unittest.TestCase):
 
         self.assertIn(
             "Known project gnw_transport_paper: memory: Figure revision status",
+            runner.project_triage_prompts[0][0],
+        )
+        self.assertNotIn(
+            "Confidential full project brief that belongs to execution.",
             runner.project_triage_prompts[0][0],
         )
         self.assertEqual(self.app.state.active_project(123), "gnw_transport_paper")
