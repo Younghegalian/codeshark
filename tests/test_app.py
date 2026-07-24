@@ -2740,8 +2740,8 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         self.assertIn("validator phase", runner.prompts[2][0])
         self.assertEqual(runner.prompts[2][1], None)
         self.assertTrue(runner.prompts[2][2])
-        self.assertFalse(runner.prompts[2][4])
-        self.assertFalse(runner.prompts[2][5])
+        self.assertTrue(runner.prompts[2][4])
+        self.assertTrue(runner.prompts[2][5])
         self.assertIn("reconciliation phase", runner.prompts[3][0])
         self.assertIn("VERDICT: PASS", runner.prompts[3][0])
         self.assertIn("[Telegram final-response skill]", runner.prompts[3][0])
@@ -3164,6 +3164,32 @@ class AgentAppAuthorizationTests(unittest.TestCase):
             self.api.messages,
             [(123, "The independently validated analysis is complete.")],
         )
+
+    def test_full_access_admin_uses_full_access_for_owner_and_support_phases(self) -> None:
+        app = AgentApp(
+            replace(self.config, admin_full_access=True, admin_auto_approve_actions=True), self.api
+        )
+        app.state.mark_owner_onboarding_requested()
+        runner = FakeCodexRunner(
+            RunResult(0, "Planning complete.", "preflight-thread", "")
+        )
+        runner.results.extend(
+            [
+                RunResult(0, "Primary analysis complete.", "primary-thread", ""),
+                RunResult(0, "VERDICT: PASS\n1. Pass: verified.", "validator-thread", ""),
+                RunResult(0, "Validated result.", "primary-thread", ""),
+            ]
+        )
+        app.runner = runner
+
+        app._handle_update(self.update(123, "Analyze the data and cross validate it."))
+        task = app.store.claim_next_task()
+        app._execute_task(task)
+
+        self.assertTrue(runner.triage_prompts[0][5])
+        self.assertEqual(len(runner.prompts), 4)
+        self.assertTrue(all(prompt[5] for prompt in runner.prompts))
+        self.assertEqual(self.api.messages, [(123, "Validated result.")])
 
     def test_cross_validation_retries_with_a_fresh_validator_session(self) -> None:
         app = AgentApp(
