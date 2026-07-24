@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import threading
 import time
 from unittest.mock import Mock
 import tempfile
@@ -345,6 +346,33 @@ class CodexRunnerTests(unittest.TestCase):
 
             self.assertEqual(first, {"method": "first"})
             self.assertEqual(second, {"method": "second"})
+        finally:
+            os.close(write_descriptor)
+            stream.close()
+
+    def test_app_server_reader_accepts_large_completed_item(self) -> None:
+        read_descriptor, write_descriptor = os.pipe()
+        stream = os.fdopen(read_descriptor, "r", encoding="utf-8")
+        process = SimpleNamespace(stdout=stream)
+        payload = json.dumps(
+            {"method": "item/completed", "params": {"text": "x" * 2_100_000}}
+        ).encode("utf-8") + b"\n"
+
+        def write_payload() -> None:
+            remaining = memoryview(payload)
+            while remaining:
+                written = os.write(write_descriptor, remaining)
+                remaining = remaining[written:]
+
+        writer = threading.Thread(target=write_payload)
+        try:
+            writer.start()
+            message = self.runner._read_server_message(process, time.monotonic() + 5)
+            writer.join(timeout=5)
+
+            self.assertFalse(writer.is_alive())
+            self.assertEqual(message["method"], "item/completed")
+            self.assertEqual(len(message["params"]["text"]), 2_100_000)
         finally:
             os.close(write_descriptor)
             stream.close()

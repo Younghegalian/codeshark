@@ -65,6 +65,12 @@ _TOOL_USAGE_FIELD_BY_ITEM_TYPE = {
 }
 
 
+# A completed tool item can legitimately include a large local command result.
+# Keep a finite bound for corrupted streams, but do not reject normal project
+# output just because it exceeds the old 2 MiB transport buffer.
+_MAX_APP_SERVER_PROTOCOL_MESSAGE_BYTES = 32 * 1024 * 1024
+
+
 @dataclass(frozen=True)
 class RateLimitWindow:
     used_percent: int
@@ -576,7 +582,7 @@ class CodexRunner:
             if not chunk:
                 raise RuntimeError("Codex app-server closed its protocol stream")
             read_buffer += chunk
-            if len(read_buffer) > 2_000_000:
+            if len(read_buffer) > _MAX_APP_SERVER_PROTOCOL_MESSAGE_BYTES:
                 raise RuntimeError("Codex app-server returned an oversized protocol message")
         raw_line, _, read_buffer = read_buffer.partition(b"\n")
         try:
@@ -1037,7 +1043,7 @@ class CodexRunner:
             if not chunk:
                 raise RuntimeError("Codex app-server closed its protocol stream")
             self._server_read_buffer += chunk
-            if len(self._server_read_buffer) > 2_000_000:
+            if len(self._server_read_buffer) > _MAX_APP_SERVER_PROTOCOL_MESSAGE_BYTES:
                 raise RuntimeError("Codex app-server returned an oversized protocol message")
         raw_line, _, self._server_read_buffer = self._server_read_buffer.partition(b"\n")
         try:
