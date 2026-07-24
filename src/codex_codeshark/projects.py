@@ -4,11 +4,17 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .secure_io import atomic_write_text
+
 
 DEFAULT_PROJECT = "General"
 GLOBAL_SCOPE = "global"
 
 _WORKSPACE_NON_PROJECT_DIRECTORIES = frozenset({"deliverables", "inbox"})
+PROJECT_SSOT_FILENAME = "PROJECT_SSOT.md"
+_SSOT_MEMORY_START = "<!-- CODESHARK_PROJECT_MEMORY_START -->"
+_SSOT_MEMORY_END = "<!-- CODESHARK_PROJECT_MEMORY_END -->"
+_MAX_SSOT_BYTES = 512_000
 
 
 @dataclass(frozen=True)
@@ -17,6 +23,98 @@ class WorkspaceProject:
 
     name: str
     path: Path
+
+
+def _project_directory(workdir: Path, project: str) -> Path:
+    normalized = normalize_project_name(project)
+    if normalized.casefold() == DEFAULT_PROJECT.casefold():
+        raise ValueError("General does not have a project directory")
+    root = workdir.expanduser().resolve()
+    directory = (root / normalized).resolve()
+    if directory.parent != root or not directory.is_dir():
+        raise ValueError(f"project directory is unavailable: {normalized}")
+    return directory
+
+
+def project_ssot_path(workdir: Path, project: str) -> Path:
+    """Return the safe project-local SSOT path for one workspace project."""
+    return _project_directory(workdir, project) / PROJECT_SSOT_FILENAME
+
+
+def ensure_project_ssot(workdir: Path, project: str) -> Path:
+    """Create the durable project brief before Codeshark begins project work."""
+    path = project_ssot_path(workdir, project)
+    if path.exists() or path.is_symlink():
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"project SSOT is not a regular file: {path}")
+        return path
+    template = "\n".join(
+        (
+            f"# {project} — Project SSOT",
+            "",
+            "This is the durable project-local source of truth for Codeshark and collaborators.",
+            "Keep the owner-maintained brief current; Codeshark records explicit major details separately below.",
+            "",
+            "## Owner-maintained brief",
+            "",
+            "- Objective:",
+            "- Scope:",
+            "- Constraints:",
+            "- Decisions:",
+            "- Current status:",
+            "- Deliverables:",
+            "",
+            _SSOT_MEMORY_START,
+            "## Codeshark-captured project details",
+            "",
+            "_No project details have been captured yet._",
+            _SSOT_MEMORY_END,
+            "",
+        )
+    )
+    atomic_write_text(path, template, mode=0o644, private_parent=False)
+    return path
+
+
+def read_project_ssot(workdir: Path, project: str, *, max_chars: int = 4_000) -> str:
+    """Read a bounded project SSOT excerpt without following a symlink."""
+    path = project_ssot_path(workdir, project)
+    if not path.exists():
+        return ""
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"project SSOT is not a regular file: {path}")
+    if path.stat().st_size > _MAX_SSOT_BYTES:
+        raise ValueError(f"project SSOT exceeds {_MAX_SSOT_BYTES} bytes: {path}")
+    return path.read_text(encoding="utf-8")[:max_chars]
+
+
+def sync_project_ssot(
+    workdir: Path,
+    project: str,
+    details: tuple[tuple[str, str], ...],
+) -> Path:
+    """Synchronize Codeshark-owned project details without altering the owner brief."""
+    path = ensure_project_ssot(workdir, project)
+    current = read_project_ssot(workdir, project, max_chars=_MAX_SSOT_BYTES)
+    lines = [_SSOT_MEMORY_START, "## Codeshark-captured project details", ""]
+    if details:
+        for title, content in details:
+            normalized_title = " ".join(title.split()) or "Project detail"
+            normalized_content = " ".join(content.split())
+            if normalized_content:
+                lines.append(f"- **{normalized_title}** — {normalized_content}")
+    else:
+        lines.append("_No project details have been captured yet._")
+    lines.extend((_SSOT_MEMORY_END, ""))
+    managed = "\n".join(lines)
+    start = current.find(_SSOT_MEMORY_START)
+    end = current.find(_SSOT_MEMORY_END, start + len(_SSOT_MEMORY_START))
+    if start >= 0 and end >= 0:
+        updated = current[:start].rstrip() + "\n\n" + managed + current[end + len(_SSOT_MEMORY_END) :]
+    else:
+        updated = current.rstrip() + "\n\n" + managed
+    atomic_write_text(path, updated, mode=0o644, private_parent=False)
+    return path
 
 
 def discover_workspace_projects(

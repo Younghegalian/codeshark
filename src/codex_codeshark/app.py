@@ -52,8 +52,11 @@ from .projects import (
     WorkspaceProject,
     create_workspace_project,
     discover_workspace_projects,
+    ensure_project_ssot,
     normalize_project_name,
     project_named_in_request,
+    read_project_ssot,
+    sync_project_ssot,
 )
 from .recall import RecallStore
 from .secure_io import atomic_write_text
@@ -308,6 +311,12 @@ class WorkflowPlan:
 class ProjectRoute:
     decision: str
     project: str | None = None
+
+
+@dataclass(frozen=True)
+class TriageDecision:
+    tier: str
+    project_memories: tuple[ProposedLearning, ...] = ()
 
 
 def split_message(text: str, limit: int = 3900) -> list[str]:
@@ -2060,6 +2069,12 @@ class AgentApp:
                 project = selected_project
                 task = replace(task, prompt=scope_task_prompt(project, request))
                 self._set_active_task_project(task)
+        if (
+            not task.restricted
+            and project != DEFAULT_PROJECT
+            and self._project_directory_is_available(project)
+        ):
+            self._ensure_project_ssot(project)
         full_access = self.config.admin_full_access and not task.restricted
         effective_approval = task.approved or (
             self.config.admin_auto_approve_actions and not task.restricted
@@ -2365,6 +2380,8 @@ class AgentApp:
                 source_prompt=request,
                 scope=project,
             )
+            if project != DEFAULT_PROJECT:
+                self._sync_project_ssot(project)
         result = replace(result, message=clean_message)
         if not successful:
             self.store.save_safe_retry_payload(task)
@@ -3035,9 +3052,16 @@ class AgentApp:
             approved=False,
             full_access=False,
         )
-        tier = self._parse_workflow_tier(triage.message) if self._run_succeeded(triage) else None
-        if tier is not None:
-            return self._workflow_profile(tier.replace("_", "-"))
+        decision = self._parse_workflow_decision(triage.message) if self._run_succeeded(triage) else None
+        if decision is not None:
+            if project != DEFAULT_PROJECT and decision.project_memories:
+                self._record_project_memories(
+                    project,
+                    decision.project_memories,
+                    source_task_id=task.id,
+                    source_prompt=request,
+                )
+            return self._workflow_profile(decision.tier.replace("_", "-"))
         LOGGER.warning("workflow triage did not return a valid tier; using direct execution")
         return self._workflow_profile("quick")
 
@@ -3162,6 +3186,9 @@ class AgentApp:
             text = " ".join(memory.text.split())
             if text:
                 lines.append(f"Current project memory: {text[:280]}")
+        ssot = self._project_ssot_context(active_project)
+        if ssot:
+            lines.append(ssot)
         names = {item.name for item in candidates}
         project_cues: dict[str, list[str]] = {name: [] for name in names}
         for memory in self.memory.list():
@@ -3405,6 +3432,11 @@ class AgentApp:
 
     @staticmethod
     def _parse_workflow_tier(message: str) -> str | None:
+        decision = AgentApp._parse_workflow_decision(message)
+        return decision.tier if decision is not None else None
+
+    @staticmethod
+    def _parse_workflow_decision(message: str) -> TriageDecision | None:
         candidates = [message.strip()]
         candidates.extend(line.strip() for line in message.splitlines() if line.strip())
         for candidate in candidates:
@@ -3415,15 +3447,94 @@ class AgentApp:
             if not isinstance(decision, dict):
                 continue
             tier = decision.get("tier")
-            if isinstance(tier, str) and tier in {
+            if not isinstance(tier, str) or tier not in {
                 "quick",
                 "routine",
                 "standard",
                 "deep",
                 "high_assurance",
             }:
-                return tier
+                continue
+            memories: list[ProposedLearning] = []
+            raw_memories = decision.get("project_memories", [])
+            if isinstance(raw_memories, list):
+                for raw_memory in raw_memories[:3]:
+                    if not isinstance(raw_memory, dict):
+                        continue
+                    title = raw_memory.get("title")
+                    content = raw_memory.get("content")
+                    evidence = raw_memory.get("evidence")
+                    if not isinstance(title, str) or not isinstance(content, str):
+                        continue
+                    normalized_title = " ".join(title.split())
+                    normalized_content = " ".join(content.split())
+                    if (
+                        not normalized_title
+                        or not normalized_content
+                        or len(normalized_title) > 100
+                        or len(normalized_content) > 1000
+                        or not isinstance(evidence, str)
+                    ):
+                        continue
+                    memories.append(
+                        ProposedLearning(
+                            kind="memory",
+                            title=normalized_title,
+                            content=normalized_content,
+                            evidence=" ".join(evidence.split()),
+                        )
+                    )
+            return TriageDecision(tier, tuple(memories))
         return None
+
+    def _ensure_project_ssot(self, project: str) -> Path:
+        try:
+            path = ensure_project_ssot(self.config.workdir, project)
+            self._sync_project_ssot(project)
+            return path
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise RuntimeError(f"could not prepare project SSOT for {project}: {exc}") from exc
+
+    def _project_directory_is_available(self, project: str) -> bool:
+        try:
+            workspace = self.config.workdir.expanduser().resolve()
+            directory = (workspace / normalize_project_name(project)).resolve()
+        except (OSError, ValueError):
+            return False
+        return directory.parent == workspace and directory.is_dir()
+
+    def _sync_project_ssot(self, project: str) -> None:
+        if project == DEFAULT_PROJECT:
+            return
+        details = tuple(
+            (item.title or "Project memory", item.text)
+            for item in self.memory.list_for_project(project)
+            if item.scope == project
+        )
+        try:
+            sync_project_ssot(self.config.workdir, project, details)
+        except (OSError, RuntimeError, ValueError) as exc:
+            LOGGER.warning("could not synchronize project SSOT project=%s: %s", project, exc)
+
+    def _record_project_memories(
+        self,
+        project: str,
+        memories: tuple[ProposedLearning, ...],
+        *,
+        source_task_id: str,
+        source_prompt: str,
+    ) -> None:
+        applied = False
+        for memory in memories:
+            if self._auto_apply_learning(
+                memory,
+                source_task_id=source_task_id,
+                source_prompt=source_prompt,
+                scope=project,
+            ):
+                applied = True
+        if applied:
+            self._sync_project_ssot(project)
 
     def _triage_context(self, task: TaskRecord, project: str, request: str) -> str:
         """Provide project facts and bounded recent project context for tier selection."""
@@ -3440,12 +3551,15 @@ class AgentApp:
             content = " ".join(asset.content.split())
             if content:
                 lines.append(f"Relevant {asset.kind} asset ({asset.title}): {content[:360]}")
+        ssot = self._project_ssot_context(project)
+        if ssot:
+            lines.append(ssot)
         lines.append(self._task_context(task, project))
         return self._bounded_context_text("\n".join(lines), _MAX_TRIAGE_CONTEXT_CHARS)
 
     def _task_context(self, task: TaskRecord, project: str) -> str:
         """Give every task stage bounded project history and live work state."""
-        sections = [self._conversation_context(task.chat_id, project)]
+        sections = [self._project_ssot_context(project), self._conversation_context(task.chat_id, project)]
         if self.store.is_group_enabled(task.chat_id):
             sections.append(
                 self._group_context_prompt(
@@ -3463,6 +3577,20 @@ class AgentApp:
             "\n\n".join(section for section in sections if section),
             _MAX_TASK_CONTEXT_CHARS,
         )
+
+    def _project_ssot_context(self, project: str) -> str:
+        if project == DEFAULT_PROJECT:
+            return ""
+        if not self._project_directory_is_available(project):
+            return ""
+        try:
+            content = read_project_ssot(self.config.workdir, project)
+        except (OSError, RuntimeError, ValueError) as exc:
+            LOGGER.warning("could not read project SSOT project=%s: %s", project, exc)
+            return ""
+        if not content.strip():
+            return ""
+        return "[Project SSOT]\n" + content + "\n[/Project SSOT]"
 
     def _execution_work_context(self, task: TaskRecord, project: str) -> str:
         """Give an executor fresh same-chat project facts alongside its persistent thread."""
@@ -3531,8 +3659,15 @@ class AgentApp:
                 "Do not escalate beyond routine merely because a task is technical, writes files, uses tools, has one deliverable, or needs ordinary validation. Escalate only ",
                 "when the user explicitly requests independent review/cross-validation or the work genuinely needs a separate ",
                 "critical second pass. Permissions and approval are enforced elsewhere.",
+                "When the active project is not General, also identify up to three explicit, durable project details "
+                "from the original request only: objective, scope, constraint, decision, status, or deliverable. "
+                "Do not infer, summarize, or save generic task phrasing. For each kept detail, copy its content and evidence "
+                "as the same exact user wording so Codeshark can safely store it as project memory. Omit project_memories "
+                "when there is no durable detail.",
                 "Return only one JSON object with this exact shape: {\"tier\": \"quick|routine|standard|deep|high_assurance\", "
-                "\"confidence\": \"low|medium|high\", \"reason\": \"brief\"}.",
+                "\"confidence\": \"low|medium|high\", \"reason\": \"brief\", \"project_memories\": "
+                "[{\"title\": \"stable short title\", \"content\": \"exact user wording\", "
+                "\"evidence\": \"the same exact user wording\"}] }.",
                 "",
                 "[Task context]",
                 context,
@@ -4921,6 +5056,7 @@ class AgentApp:
             source_task_id=None,
             created_at=item.created_at,
         )
+        self._sync_project_ssot(item.scope)
         self._send_message(
             chat_id,
             f"Stored long-term memory {item.id} for {item.scope}.",
@@ -5036,6 +5172,7 @@ class AgentApp:
                 self._send_message(chat_id, f"Could not apply the learning proposal: {exc}")
                 return
             self.learning.set_status(item_id, "approved")
+            self._sync_project_ssot(candidate.scope)
             self._send_message(chat_id, f"Approved and applied learning proposal {item_id}.")
             self._backup_personal_data()
             return

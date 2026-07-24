@@ -1729,6 +1729,92 @@ class AgentAppAuthorizationTests(unittest.TestCase):
         )
         self.assertEqual(self.app.state.active_project(123), "gnw_transport_paper")
 
+    def test_project_task_creates_and_loads_a_project_ssot(self) -> None:
+        project = "gnw_transport_paper"
+        (self.config.workdir / project).mkdir()
+        runner = FakeCodexRunner(
+            project_triage_message=(
+                '{"decision": "existing", "project": "gnw_transport_paper", "confidence": "high"}'
+            )
+        )
+        self.app.runner = runner
+        task = self.app.store.enqueue_task(
+            123,
+            "Continue the GNW transport paper project.",
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(task)
+
+        ssot = self.config.workdir / project / "PROJECT_SSOT.md"
+        self.assertTrue(ssot.is_file())
+        self.assertIn("# gnw_transport_paper — Project SSOT", ssot.read_text(encoding="utf-8"))
+        self.assertIn("[Project SSOT]", runner.prompts[0][0])
+
+    def test_triage_records_explicit_project_details_in_memory_and_ssot(self) -> None:
+        project = "gnw_transport_paper"
+        (self.config.workdir / project).mkdir()
+        detail = "Figure 8 marker colors must match the SEM panels."
+        runner = FakeCodexRunner(
+            triage_message=json.dumps(
+                {
+                    "tier": "quick",
+                    "confidence": "high",
+                    "reason": "test",
+                    "project_memories": [
+                        {
+                            "title": "Figure 8 marker rule",
+                            "content": detail,
+                            "evidence": detail,
+                        }
+                    ],
+                }
+            ),
+            project_triage_message=(
+                '{"decision": "existing", "project": "gnw_transport_paper", "confidence": "high"}'
+            ),
+        )
+        self.app.runner = runner
+        task = self.app.store.enqueue_task(
+            123,
+            "Continue GNW transport paper. " + detail,
+            source="telegram",
+            ephemeral=False,
+            approved=True,
+        )
+
+        self.app._execute_task(task)
+
+        memories = self.app.memory.list_for_project(project)
+        self.assertTrue(
+            any(item.title == "Figure 8 marker rule" and item.text == detail for item in memories)
+        )
+        ssot_text = (self.config.workdir / project / "PROJECT_SSOT.md").read_text(encoding="utf-8")
+        self.assertIn("**Figure 8 marker rule** — " + detail, ssot_text)
+
+    def test_ssot_sync_preserves_the_owner_managed_brief(self) -> None:
+        project = "gnw_transport_paper"
+        project_directory = self.config.workdir / project
+        project_directory.mkdir()
+        ssot = project_directory / "PROJECT_SSOT.md"
+        ssot.write_text(
+            "# Existing project brief\n\n## Owner-maintained brief\n- Objective: Keep this text.\n",
+            encoding="utf-8",
+        )
+        self.app.memory.upsert(
+            "Project constraint",
+            "Use the existing LaTeX template.",
+            scope=project,
+        )
+
+        self.app._ensure_project_ssot(project)
+
+        text = ssot.read_text(encoding="utf-8")
+        self.assertIn("- Objective: Keep this text.", text)
+        self.assertIn("**Project constraint** — Use the existing LaTeX template.", text)
+
     def test_project_router_can_leave_a_stale_active_project_for_projectless_work(self) -> None:
         (self.config.workdir / "FETM").mkdir()
         self.app.state.set_active_project(123, "FETM")
